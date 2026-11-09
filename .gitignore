@@ -1,0 +1,19 @@
+# 빌드 산출물 (저장소에 넣지 않음)
+edopro-full.html
+edopro-full.js
+edopro-full.wasm
+edopro-full.data
+release/
+*.zip
+*.tar
+*.7z
+
+# 파이썬
+__pycache__/
+*.pyc
+
+# 편집기/임시
+.vscode/
+.idea/
+*.bak
+*.log

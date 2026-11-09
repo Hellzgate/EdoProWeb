@@ -1,0 +1,475 @@
+diff --git a/gframe/compiler_features.h b/gframe/compiler_features.h
+index 7c2a72d..e2c3d26 100644
+--- a/gframe/compiler_features.h
++++ b/gframe/compiler_features.h
+@@ -39,6 +39,11 @@
+ #endif
+ #endif //__APPLE__
+ 
++#if defined(__EMSCRIPTEN__)
++#undef EDOPRO_LINUX
++#define EDOPRO_LINUX 1
++#endif
++
+ #if defined(__linux__)
+ #if defined(__ANDROID__)
+ #undef EDOPRO_ANDROID
+diff --git a/gframe/data_handler.cpp b/gframe/data_handler.cpp
+index df84151..aad96a3 100644
+--- a/gframe/data_handler.cpp
++++ b/gframe/data_handler.cpp
+@@ -1,4 +1,7 @@
+ #include "data_handler.h"
++#ifdef __EMSCRIPTEN__
++#include <cstdio>
++#endif
+ #include <irrlicht.h>
+ #include "config.h"
+ #include "cli_args.h"
+@@ -107,6 +110,9 @@ DataHandler::DataHandler() {
+ 	gGameConfig = configs.get();
+ #if !EDOPRO_ANDROID
+ 	tmp_device = GUIUtils::CreateDevice(configs.get());
++#ifdef __EMSCRIPTEN__
++	fprintf(stderr, "[flow] tmp_device ok (%p)\n", (void*)tmp_device.get());
++#endif
+ #endif
+ #if EDOPRO_IOS
+ 	if(tmp_device->getVideoDriver()) {
+@@ -119,7 +125,13 @@ DataHandler::DataHandler() {
+ 	Utils::OSOperator = new irr::COSAndroidOperator();
+ 	configs->ssl_certificate_path = epro::format("{}/cacert.pem", porting::internal_storage);
+ #else
++#ifdef __EMSCRIPTEN__
++	fprintf(stderr, "[flow] get OSOperator\n");
++#endif
+ 	Utils::OSOperator = tmp_device->getGUIEnvironment()->getOSOperator();
++#ifdef __EMSCRIPTEN__
++	fprintf(stderr, "[flow] OSOperator ok\n");
++#endif
+ 	Utils::OSOperator->grab();
+ 	if(configs->override_ssl_certificate_path.size()) {
+ 		if(configs->override_ssl_certificate_path != "none" && Utils::FileExists(Utils::ToPathString(configs->override_ssl_certificate_path)))
+@@ -154,6 +166,9 @@ DataHandler::DataHandler() {
+ 		}
+ 		sound_backend = configs->sound_backend;
+ 	}
++#ifdef __EMSCRIPTEN__
++	fprintf(stderr, "[flow] before SoundManager\n");
++#endif
+ 	sounds = std::make_unique<SoundManager>(configs->soundVolume / 100.0, configs->musicVolume / 100.0, configs->enablesound, configs->enablemusic, sound_backend);
+ 	gitManager->ToggleReadOnly(cli_args[REPOS_READ_ONLY].enabled);
+ 	gitManager->LoadRepositoriesFromJson(configs->user_configs);
+@@ -161,10 +176,19 @@ DataHandler::DataHandler() {
+ 	if(gitManager->TerminateIfNothingLoaded())
+ 		deckManager->StopDummyLoading();
+ 	imageDownloader = std::make_unique<ImageDownloader>();
++#ifdef __EMSCRIPTEN__
++	fprintf(stderr, "[flow] before LoadDatabases\n");
++#endif
+ 	LoadDatabases();
++#ifdef __EMSCRIPTEN__
++	fprintf(stderr, "[flow] LoadDatabases ok\n");
++#endif
+ 	LoadPicUrls();
+ 	deckManager->LoadLFList();
+ 	dataManager->LoadIdsMapping(EPRO_TEXT("./config/mappings.json"));
++#ifdef __EMSCRIPTEN__
++	fprintf(stderr, "[flow] DataHandler ctor done\n");
++#endif
+ }
+ DataHandler::~DataHandler() {
+ 	if(filesystem)
+diff --git a/gframe/duelclient.cpp b/gframe/duelclient.cpp
+index 05b5092..b7fa906 100644
+--- a/gframe/duelclient.cpp
++++ b/gframe/duelclient.cpp
+@@ -143,8 +143,12 @@ bool DuelClient::StartClient(const epro::Address& ip, uint16_t port, uint32_t ga
+ 		client_thread.join();
+ 	mainGame->frameSignal.SetNoWait(false);
+ 	stop_threads = false;
++#ifdef __EMSCRIPTEN__
++	/* [web] 스레드 대신 메인 루프에서 PumpWeb() 으로 처리한다 */
++#else
+ 	parsing_thread = epro::thread(ParserThread);
+ 	client_thread = epro::thread(ClientThread);
++#endif
+ 	return true;
+ }
+ void DuelClient::ConnectTimeout([[maybe_unused]] evutil_socket_t fd, [[maybe_unused]] short events, [[maybe_unused]] void* arg) {
+@@ -308,6 +312,45 @@ void DuelClient::ClientThread() {
+ 	client_base = 0;
+ }
+ 
++#ifdef __EMSCRIPTEN__
++extern "C" int evlite_loop_break_requested(void);
++extern "C" void evlite_reset_break(void);
++
++/* [web] 메인 루프에서 매 프레임 호출: WS 이벤트는 프레임 사이 emscripten_sleep 에서 전달된다. */
++void DuelClient::PumpWeb() {
++	if(!client_base)
++		return;
++
++	/* 파서 큐 처리 (비차단) */
++	while(true) {
++		std::vector<uint8_t> pkt;
++		{
++			std::lock_guard<epro::mutex> lck(to_analyze_mutex);
++			if(to_analyze.empty())
++				break;
++			pkt = std::move(to_analyze.front());
++			to_analyze.pop_front();
++		}
++		HandleSTOCPacketLanAsync(pkt);
++	}
++
++	/* 루프브레이크(연결 종료/타임아웃) 처리 */
++	if(evlite_loop_break_requested()) {
++		evlite_reset_break();
++		stop_threads = true;
++		if(client_bev) {
++			bufferevent_free(client_bev);
++			client_bev = 0;
++		}
++		if(client_base) {
++			event_base_free(client_base);
++			client_base = 0;
++		}
++		connect_state = 0;
++	}
++}
++#endif
++
+ void DuelClient::ParserThread() {
+ 	Utils::SetThreadName("ParserThread");
+ 	while(true) {
+diff --git a/gframe/duelclient.h b/gframe/duelclient.h
+index 73abc08..f63283f 100644
+--- a/gframe/duelclient.h
++++ b/gframe/duelclient.h
+@@ -59,6 +59,10 @@ public:
+ 	static void ClientRead(bufferevent* bev, void* ctx);
+ 	static void ClientEvent(bufferevent *bev, short events, void *ctx);
+ 	static void ClientThread();
++#ifdef __EMSCRIPTEN__
++	/* [web] 단일 스레드: 메인 루프에서 네트워크 이벤트를 펌프한다 */
++	static void PumpWeb();
++#endif
+ 	static void HandleSTOCPacketLanSync(std::vector<uint8_t>&& data);
+ 	static void HandleSTOCPacketLanAsync(const std::vector<uint8_t>& data);
+ 	static void ParserThread();
+diff --git a/gframe/edopro_main.cpp b/gframe/edopro_main.cpp
+index e4fcb34..3689c3a 100644
+--- a/gframe/edopro_main.cpp
++++ b/gframe/edopro_main.cpp
+@@ -4,6 +4,10 @@
+ #include "repo_cloner.h"
+ #include "epro_thread.h"
+ #include "utils.h"
++#ifdef __EMSCRIPTEN__
++#include <cstdio>
++#include <exception>
++#endif
+ 
+ #if EDOPRO_WINDOWS
+ #define real_main edopro_main
+@@ -93,5 +97,19 @@ extern "C" int real_main(int argc, epro::path_char** argv) {
+ 	cli_args = ParseArguments(argc, argv);
+ 	if(cli_args[ONLY_CLONE_REPOS].enabled)
+ 		return repo_cloner_main(cli_args);
++#ifdef __EMSCRIPTEN__
++	try {
++		return edopro_main(cli_args);
++	} catch(const std::exception& e) {
++		fprintf(stderr, "[fatal] uncaught: %s\n", e.what());
++		fflush(stderr);
++		return 1;
++	} catch(...) {
++		fprintf(stderr, "[fatal] uncaught: unknown\n");
++		fflush(stderr);
++		return 1;
++	}
++#else
+ 	return edopro_main(cli_args);
++#endif
+ }
+diff --git a/gframe/game.cpp b/gframe/game.cpp
+index f4aa146..5948648 100644
+--- a/gframe/game.cpp
++++ b/gframe/game.cpp
+@@ -1,4 +1,7 @@
+ #include <sstream>
++#ifdef __EMSCRIPTEN__
++#include <emscripten.h>
++#endif
+ #include <nlohmann/json.hpp>
+ #include <irrlicht.h>
+ #include "client_updater.h"
+@@ -1995,6 +1998,10 @@ bool Game::MainLoop() {
+ 		GUIUtils::ToggleFullscreen(device.get(), currentlyFullscreen);
+ 	}
+ 	while(!restart && device->run()) {
++#ifdef __EMSCRIPTEN__
++		/* [web] emscripten: 프레임마다 브라우저 이벤트 루프에 양보 (Asyncify) */
++		DuelClient::PumpWeb();
++#endif
+ 		DispatchQueue();
+ 		if(suspend) {
+ 			epro::this_thread::sleep_for(std::chrono::milliseconds(1));
+@@ -2262,10 +2269,14 @@ bool Game::MainLoop() {
+ #endif
+ 			int64_t delta = std::round(fps * (1000.0f / fpsLimit) - cur_time);
+ 			if(delta > 0) {
++#ifdef __EMSCRIPTEN__
++				emscripten_sleep((unsigned int)delta);
++#else
+ 				int64_t t = timer->getRealTime();
+ 				while((timer->getRealTime() - t) < delta) {
+ 					epro::this_thread::sleep_for(std::chrono::milliseconds(1));
+ 				}
++#endif
+ 			}
+ 		}
+ 		while(cur_time >= 1000) {
+@@ -2276,8 +2287,12 @@ bool Game::MainLoop() {
+ 				if(dInfo.time_left[dInfo.time_player])
+ 					dInfo.time_left[dInfo.time_player]--;
+ 		}
++#ifdef __EMSCRIPTEN__
++		emscripten_sleep(0);
++#else
+ 		if(gGameConfig->maxFPS != -1)
+ 			epro::this_thread::sleep_for(std::chrono::milliseconds(1));
++#endif
+ 	}
+ 	discord.UpdatePresence(DiscordWrapper::TERMINATE);
+ 	{
+diff --git a/gframe/game_config.cpp b/gframe/game_config.cpp
+index 2d10b0a..a0a3c0e 100644
+--- a/gframe/game_config.cpp
++++ b/gframe/game_config.cpp
+@@ -103,6 +103,10 @@ irr::video::E_DRIVER_TYPE parseOption<irr::video::E_DRIVER_TYPE>(std::string& va
+ 		return irr::video::EDT_OGLES1;
+ 	if(value == "OGLES2")
+ 		return irr::video::EDT_OGLES2;
++#ifdef _IRR_COMPILE_WITH_WEBGL1_
++	if(value == "WEBGL1")
++		return irr::video::EDT_WEBGL1;
++#endif
+ #endif
+ 	return irr::video::EDT_COUNT;
+ }
+@@ -244,6 +248,10 @@ std::string serializeOption(const irr::video::E_DRIVER_TYPE& driver) {
+ 		return "ogles1";
+ 	case irr::video::EDT_OGLES2:
+ 		return "ogles2";
++#ifdef _IRR_COMPILE_WITH_WEBGL1_
++	case irr::video::EDT_WEBGL1:
++		return "webgl1";
++#endif
+ #endif
+ 	case irr::video::EDT_COUNT:
+ 		return "default";
+diff --git a/gframe/gframe.cpp b/gframe/gframe.cpp
+index 121892a..610d178 100644
+--- a/gframe/gframe.cpp
++++ b/gframe/gframe.cpp
+@@ -1,3 +1,9 @@
++#ifdef __EMSCRIPTEN__
++#include <cstdio>
++#define WEBFLOW(msg) fprintf(stderr, "[flow] " msg "\n")
++#else
++#define WEBFLOW(msg) (void)0
++#endif
+ #include "config.h"
+ #include <event2/thread.h>
+ #include <IrrlichtDevice.h>
+@@ -154,8 +160,10 @@ int edopro_main(const args_t& args) {
+ 		ygo::GUIUtils::ShowErrorWindow("Initialization fail", text);
+ 		return EXIT_FAILURE;
+ 	}
++	WEBFLOW("before updater");
+ 	if (!data->configs->noClientUpdates)
+ 		updater.CheckUpdates();
++	WEBFLOW("after updater");
+ #if EDOPRO_WINDOWS
+ 	if(!data->configs->showConsole) {
+ 		FILE* fDummy;
+@@ -182,11 +190,15 @@ int edopro_main(const args_t& args) {
+ 	bool firstlaunch = true;
+ 	bool reset = false;
+ 	do {
++		WEBFLOW("game ctor start");
+ 		Game _game{};
++		WEBFLOW("game ctor done");
+ 		ygo::mainGame = &_game;
+ 		std::swap(data->tmp_device, ygo::mainGame->device);
++		WEBFLOW("device swapped");
+ 		try {
+ 			ygo::mainGame->Initialize();
++			WEBFLOW("Initialize done");
+ 		}
+ 		catch(const std::exception& e) {
+ 			epro::stringview text(e.what());
+@@ -201,7 +213,9 @@ int edopro_main(const args_t& args) {
+ 			firstlaunch = false;
+ 			CheckArguments(args);
+ 		}
++		WEBFLOW("MainLoop enter");
+ 		reset = ygo::mainGame->MainLoop();
++		WEBFLOW("MainLoop returned");
+ 		std::swap(data->tmp_device, ygo::mainGame->device);
+ 		if(reset) {
+ 			auto device = data->tmp_device;
+diff --git a/gframe/image_downloader.cpp b/gframe/image_downloader.cpp
+index 4eae2f8..c52426f 100644
+--- a/gframe/image_downloader.cpp
++++ b/gframe/image_downloader.cpp
+@@ -17,11 +17,17 @@ struct curl_payload {
+ };
+ 
+ ImageDownloader::ImageDownloader() : stop_threads(false) {
++#ifdef __EMSCRIPTEN__
++	/* [web] 단일 스레드 런타임: std::thread 생성이 예외를 던진다 -> 스레드 없이 동작 */
++	(void)0;
++#else
+ 	download_threads.reserve(gGameConfig->imageDownloadThreads);
+ 	for(int i = 0; i < gGameConfig->imageLoadThreads; ++i)
+ 		download_threads.emplace_back(&ImageDownloader::DownloadPic, this);
++#endif
+ }
+ ImageDownloader::~ImageDownloader() {
++#ifndef __EMSCRIPTEN__
+ 	{
+ 		std::lock_guard<epro::mutex> lck(pic_download);
+ 		stop_threads = true;
+@@ -29,6 +35,7 @@ ImageDownloader::~ImageDownloader() {
+ 	}
+ 	for(auto& thread : download_threads)
+ 		thread.join();
++#endif
+ }
+ void ImageDownloader::AddDownloadResource(PicSource src) {
+ 	pic_urls.push_back(src);
+diff --git a/gframe/image_manager.cpp b/gframe/image_manager.cpp
+index aed71e8..982688a 100644
+--- a/gframe/image_manager.cpp
++++ b/gframe/image_manager.cpp
+@@ -44,15 +44,46 @@ irr::s32 toPow2(irr::video::IVideoDriver* driver, irr::s32 size) {
+ }
+ }
+ 
++
++#ifdef __EMSCRIPTEN__
++#include <emscripten.h>
++#include <set>
++
++/* [web] 카드 이미지를 HTTP 로 받아 MEMFS 에 저장한다 (이미 있으면 즉시 반환) */
++/* [web] 카드 이미지: 셸이 제공하는 JS 헬퍼(window.__edoproFetchPic)로 받아 MEMFS 에 저장.
++   EM_ASYNC_JS 내부에서는 Module/FS 스코프가 불안정하므로 페이지 스코프 함수를 호출한다. */
++EM_ASYNC_JS(int, web_fetch_pic, (int code, int type), {
++	try {
++		if (typeof window !== 'undefined' && typeof window.__edoproFetchPic === 'function') {
++			return await window.__edoproFetchPic(code, type);
++		}
++	} catch (e) { console.warn('[pic] helper error', e); }
++	return 0;
++});
++
++static bool WebFetchCardImage(uint32_t code, int type) {
++	static std::set<uint32_t> tried[3];
++	int idx = (type == 1) ? 1 : ((type == 2) ? 2 : 0);
++	if(!tried[idx].insert(code).second)
++		return false;
++	return web_fetch_pic((int)code, idx) != 0;
++}
++#endif
++
+ ImageManager::ImageManager() {
+ 	stop_threads = false;
++#ifdef __EMSCRIPTEN__
++	/* [web] 단일 스레드 런타임: 스레드 생성이 예외를 던진다 -> 이미지 로딩 스레드 없이 동작 */
++#else
+ 	obj_clear_thread = epro::thread(&ImageManager::ClearFutureObjects, this);
+ 	load_threads.reserve(gGameConfig->imageLoadThreads);
+ 	for(int i = 0; i < gGameConfig->imageLoadThreads; ++i)
+ 		load_threads.emplace_back(&ImageManager::LoadPic, this);
++#endif
+ }
+ ImageManager::~ImageManager() {
+ 	stop_threads = true;
++#ifndef __EMSCRIPTEN__
+ 	obj_clear_lock.lock();
+ 	cv_clear.notify_all();
+ 	obj_clear_lock.unlock();
+@@ -62,6 +93,7 @@ ImageManager::~ImageManager() {
+ 	pic_load.unlock();
+ 	for(auto& thread : load_threads)
+ 		thread.join();
++#endif
+ 	for(auto& it : g_imgCache) {
+ 		if(it.second)
+ 			it.second->drop();
+@@ -685,6 +717,13 @@ irr::video::ITexture* ImageManager::GetTextureCard(uint32_t code, imgType type,
+ 	}();
+ 	if(code == 0)
+ 		return ret_unk;
++#ifdef __EMSCRIPTEN__
++	if(type == imgType::ART || type == imgType::THUMB) {
++		WebFetchCardImage(code, (type == imgType::COVER) ? 2 : 0);
++		/* [web] 이미지 로딩 스레드가 없으므로 동기 로딩 경로를 강제한다 */
++		wait = true;
++	}
++#endif
+ 	auto& elem = map[code];
+ 	if(elem.preload_status != preloadStatus::LOADED) {
+ 		auto status = gImageDownloader->GetDownloadStatus(code, type);
+@@ -712,6 +751,9 @@ irr::video::ITexture* ImageManager::GetTextureCard(uint32_t code, imgType type,
+ 				if(load_result.status == loadStatus::LOAD_OK) {
+ 					rmap = driver->addTexture(load_result.path.data(), load_result.texture);
+ 					load_result.texture->drop();
++#ifdef __EMSCRIPTEN__
++					elem.preload_status = preloadStatus::LOADED;
++#endif
+ 					if(chk)
+ 						*chk = 1;
+ 				} else {
+diff --git a/gframe/utils_gui.cpp b/gframe/utils_gui.cpp
+index 9d561e5..e4d0a4c 100644
+--- a/gframe/utils_gui.cpp
++++ b/gframe/utils_gui.cpp
+@@ -1,4 +1,7 @@
+ #include "utils_gui.h"
++#ifdef __EMSCRIPTEN__
++#include <cstdio>
++#endif
+ #include <irrlicht.h>
+ #include <ICursorControl.h>
+ #include "config.h"
+@@ -87,7 +90,12 @@ std::shared_ptr<irr::IrrlichtDevice> GUIUtils::CreateDevice(GameConfig* configs)
+ 	// desktop environments to group multiple instances with their desktop file
+ 	params.ClassName = EPRO_TEXT("edopro");
+ 	params.WindowCaption = EPRO_TEXT("Project Ignis: EDOPro");
++#ifdef __EMSCRIPTEN__
++	/* [web] 번들 정적 셰이더 대신 preload 한 실제 셰이더 파일을 쓴다 */
++	params.OGLES2ShaderPath = EPRO_TEXT("/media/Shaders/");
++#else
+ 	params.OGLES2ShaderPath = EPRO_TEXT("BUNDLED");
++#endif
+ 	params.WindowResizable = true;
+ #if EDOPRO_WINDOWS
+ 	params.WindowIcon = MAKEINTRESOURCE(1);
+@@ -122,7 +130,13 @@ std::shared_ptr<irr::IrrlichtDevice> GUIUtils::CreateDevice(GameConfig* configs)
+ 		params.DriverType = getDefaultDriver(params.DeviceType);
+ 	else
+ 		params.DriverType = configs->driver_type;
++#ifdef __EMSCRIPTEN__
++	fprintf(stderr, "[flow] createDeviceEx(type=%d)\n", (int)params.DriverType);
++#endif
+ 	irr::IrrlichtDevice* device = irr::createDeviceEx(params);
++#ifdef __EMSCRIPTEN__
++	fprintf(stderr, "[flow] createDeviceEx -> %p\n", (void*)device);
++#endif
+ 	if(!device)
+ 		throw std::runtime_error("Failed to create Irrlicht Engine device!");
+ 	const auto driver = device->getVideoDriver();

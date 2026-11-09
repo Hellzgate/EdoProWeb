@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>EDOPro 저장소</title>
+<style>
+  body { background:#0d0f14; color:#c9d1d9; font:14px/1.6 system-ui,sans-serif; margin:0; padding:24px; }
+  h3 { margin:0 0 6px; }
+  input { background:#161b22; color:#c9d1d9; border:1px solid #30363d; padding:7px 10px; width:360px; border-radius:6px; }
+  button { background:#238636; color:#fff; border:0; padding:8px 16px; border-radius:6px; cursor:pointer; }
+  button.alt { background:#30363d; }
+  table { border-collapse:collapse; margin-top:18px; min-width:640px; }
+  td, th { border-bottom:1px solid #21262d; padding:6px 12px; text-align:left; font-size:13px; }
+  th { color:#8b949e; font-weight:600; }
+  #log { margin-top:16px; white-space:pre-wrap; color:#8b949e; font-family:ui-monospace,monospace; font-size:12px; }
+  code { background:#161b22; padding:1px 5px; border-radius:4px; }
+</style>
+</head>
+<body>
+<h3>EDOPro 저장소 (git)</h3>
+<p>저장소를 받거나 갱신하면, 게임을 <b>새로고침</b>할 때 <code>repositories/</code> 로 자동 적용됩니다.</p>
+<p>
+  <input id="spec" placeholder="owner/name  (예: ProjectIgnis/BabelCDB)">
+  <button onclick="sync()">받기 / 갱신</button>
+  <button class="alt" onclick="location.reload()">새로고침</button>
+</p>
+<table id="tbl">
+  <thead><tr><th>이름</th><th>커밋</th><th>파일</th><th>원격</th></tr></thead>
+  <tbody></tbody>
+</table>
+<div id="log"></div>
+<script>
+function api(u, o) { return fetch(u, o).then(function (r) { return r.json(); }); }
+
+function render(d) {
+  var tb = document.querySelector('#tbl tbody');
+  tb.innerHTML = '';
+  (d.repos || []).forEach(function (r) {
+    var tr = document.createElement('tr');
+    tr.innerHTML = '<td>' + r.name + '</td><td>' + r.head + '</td><td>' + r.files + '</td><td>' + r.remote + '</td>';
+    tb.appendChild(tr);
+  });
+}
+
+function load() { api('/api/repos').then(render); }
+
+function sync() {
+  var v = document.getElementById('spec').value.trim();
+  var log = document.getElementById('log');
+  log.textContent = '동기화 중…';
+  api('/api/repos/sync', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(v ? { repos: [v] } : {})
+  }).then(function (d) {
+    log.textContent = (d.results || []).map(function (r) {
+      return r.spec + ' -> ' + (r.ok ? 'OK ' + r.head : 'FAIL ' + r.detail);
+    }).join('\n');
+    render(d);
+  }).catch(function (e) { log.textContent = '오류: ' + e; });
+}
+
+load();
+</script>
+</body>
+</html>
