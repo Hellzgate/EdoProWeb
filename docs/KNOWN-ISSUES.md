@@ -1,59 +1,99 @@
-# 남은 문제 / 다음 단계 (v1.0.0)
+# 남은 문제 / 다음 단계 (v1.1.0)
 
-## 1. 카드 이미지가 화면에 표시되지 않음
+## 1. 카드 이미지 — ✅ 해결 (v1.1.0)
 
-**증상**: 덱 편집기·듀얼에서 카드가 모두 '뒷면(unknown)' 텍스처로 보임.
+**증상(과거)**: 덱 편집기·듀얼에서 모든 카드가 뒷면/미확인 텍스처.
 
-**확인된 사실**
-- 서버 프록시 `/img/<code>.jpg` 는 정상: `200`, 약 140KB, `/app/piccache` 캐시 동작
-- 브라우저 페이지 스코프에서는 `/img` → MEMFS `/pics/*.jpg` 쓰기가 **정상 동작**(수동 검증)
-- 게임 코드에 넣은 `web_fetch_pic`(JS 헬퍼 호출)이 **호출되지 않음**
-  → 즉 `ImageManager::GetTextureCard()` 가 해당 렌더 경로에서 불리지 않는다
+**원인 3개**
+1. `ImageManager::GetTextureCard()` 가 THUMB 를 `web_fetch_pic(code, 1)` 로 넘겨 **`/pics/field/`** 에 저장했는데,
+   실제 로딩 경로는 `pics/<code>.jpg`(ART) 이다 → 파일이 있어도 못 찾음.
+2. 이미지 로딩 스레드가 없는 웹 빌드에서 `wait=false` 경로로 빠져 `to_load` 큐에만 쌓였다.
+3. `EM_ASYNC_JS`(Asyncify) 로 구현한 `web_fetch_pic` 이 **렌더 루프 안에서 호출되지 않았다**
+   (`Asyncify` 중단 실패). 로그도 남지 않아 "호출 자체가 안 됨"으로 보였다.
+
+**수정**
+- `web_fetch_pic` 을 **동기 XHR**(`EM_ASM_INT`, `charset=x-user-defined` 로 바이너리 획득)로 교체 → Asyncify 의존 제거
+- THUMB/ART 모두 `/pics/<code>.jpg` 로 통일 (`imgType::COVER` 만 `/pics/cover/`)
+- `wait = true` 강제 + 로딩 성공 시 `preload_status = LOADED` 설정 (다음 프레임 재사용)
+- 이미 받은 카드는 `static std::set` 으로 스킵, 실패는 재시도 허용
+- 링크 오류로 **조용히 옛 wasm 이 배포되던 문제**도 확인: `link-default.sh` 가 실패해도 `cp` 가 실행된다
+  → 중복 심볼(`webpics.o` 의 `web_fetch_pic`) 제거 후 정상
+
+**실측**: 덱 편집기 진입 시 `/pics/*.jpg` **36장** 기록, 화면에 카드 아트 표시. 듀얼 중 `[pic] ok 56364287 169607B` 확인.
+
+## 2. 듀얼 시작 — ✅ 해결 (v1.1.0)
+
+**증상(과거)**: `LAN + AI 대전 → 방 만들기 → 확인` 에서 화면이 멈춤(`destroyContext requested` 로그).
+
+**원인**: `BUTTON_HOST_CONFIRM` 핸들러가 `NetServer::StartServer()` 를 호출하는데,
+그 안에서 `epro::thread(ServerThread).detach()` = **std::thread** 를 만든다.
+wasm(단일 스레드)에서는 `std::thread` 생성이 예외를 던지고, GUI 이벤트 핸들러에서 잡히지 않아
+**메인 루프가 통째로 풀리면서** 디바이스 정리(`destroyContext`)가 불리고 화면이 정지했다.
+
+**수정** (`menu_handler.cpp`)
+```cpp
+#ifdef __EMSCRIPTEN__
+        /* 브라우저에는 TCP 리스너/스레드가 없다 -> 로컬 서버를 만들지 않고
+           WS 브리지(BRIDGE_TARGET)로 외부 서버(멀티롤)에 바로 접속한다. */
+#else
+        mainGame->gBot.Refresh(...);
+        if(!NetServer::StartServer(host_port)) break;
+#endif
+        if(!DuelClient::StartClient({&ip, epro::Address::INET}, host_port)) {
+#ifndef __EMSCRIPTEN__
+            NetServer::StopServer();
+#endif
+            break;
+        }
+```
+
+**실측**: 방 만들기 → 확인 → **호스트 준비 창**(플레이어 2명) → 준비 → 시작 → **듀얼 필드 진입**.
+NAS 패널 API 로 봇(`raisemoon`) 투입 후 실제 듀얼 진행(봇 대사·드로우·소환·페이즈 표시 확인).
+
+## 3. 렌더링 — 남은 문제 (기능은 동작)
+
+**증상**: 듀얼 필드에서 `GL_INVALID_OPERATION: glDrawElements: Must have element array buffer bound` 와
+`vertexAttribPointer: no ARRAY_BUFFER is bound and offset is non-zero` 가 프레임마다 발생하고,
+필드의 **마트(존 테두리)·카드 뒷면 일부**가 어긋나 보인다(배경은 듀얼 시작 연출 이미지가 남는다).
+
+**원인(추정)**: Irrlicht `COGLES2Driver` 의 `drawVertexPrimitiveList()` 가
+`HardwareMappingHint != EHM_NEVER` 상태에서 **VBO 오프셋**을 쓰는데, wasm 빌드에서는 해당 VBO 가 없거나
+`draw2DImage*` 의 **클라이언트 포인터** 경로와 섞여 WebGL 이 이를 잘못 해석한다.
+(데스크톱 GL 은 두 방식을 섞어도 되지만 WebGL 은 안 된다)
+
+**시도한 것**: `setRenderStates2DMode()` 진입 시 `ARRAY/ELEMENT_ARRAY_BUFFER` 언바인드,
+`drawVertexPrimitiveList()` 종료 시 언바인드 → **오류는 남음**(188건/198줄).
 
 **다음 후보**
-1. 덱 편집기 그리드가 실제로는 `imageManager.tMap/tThumb` 를 직접 참조하는지 확인
-2. `drawing.cpp:1191`(썸네일) 경로가 호출되는 조건 추적
-3. 확실한 대안: **부팅 시 pics 선반입** — `/api/repos.tar` 에 `pics/` 를 포함시키고
-   `preRun` 에서 MEMFS 에 풀면 `GetTextureCard` 가 파일을 즉시 찾는다.
+1. `COGLES2Driver::drawVertexPrimitiveList` 의 `HWBuffer->Mapped_Vertex/Index` 분기를 wasm 에서 **항상 클라이언트 배열**로
+2. `COGLES2Driver::updateHardwareBuffer` 에서 VBO 생성 여부 로그 → 어느 드로우가 문제인지 특정
+3. 근본 회피: `EDT_WEBGL1` 대신 **GLES2 + WebGL2**(`-sMAX_WEBGL_VERSION=2`, `-sMIN_WEBGL_VERSION=2`)로 링크
 
-## 2. 듀얼 시작(Host → Duel)이 진행되지 않음
+> 게임 진행(드로우·소환·페이즈·효과 선택·봇 대화)은 정상 동작하며, 위 문제는 **화면 품질**에 해당한다.
 
-**증상**: `Host` 설정 창에서 `OK` 를 누르면 게임이 **디바이스 재시작** 경로로 들어가고,
-컨텍스트가 사라져 화면이 멈춘다(`destroyContext requested` 로그).
+## 4. 그 밖의 제약
 
-**이미 적용된 완화**
-- `CSDL2ContextManager::destroyContext()` 무시 + 컨텍스트 공유
-- `SDL_DestroyWindow`/`SDL_Quit` 생략
-- `MainLoop` 에서 `DuelClient::PumpWeb()` 및 `emscripten_sleep`
-
-**다음 후보**
-1. `Game::MainLoop()` 이 `restart=true` 를 반환하는 지점 확인(설정 변경? 방 생성?)
-2. 재시작 시 `Game::Initialize()` 가 **기존 컨텍스트를 재사용**하는지 확인
-   (`generateContext` 의 static 공유가 실제로 도달하는지 로그 추가)
-3. 재시작 경로를 wasm 에서 **비활성화**(방 생성 시 디바이스 재생성 없이 진행)
-
-## 3. 저장소 tar 마운트 비활성
-
-부팅 안정성을 위해 `preRun` tar 마운트를 제거했습니다(`/api/repos.tar` 자체는 유지).
-저장소 cdb/스크립트를 게임에 실제로 적용하려면 위 1-3 의 선반입 방식과 함께 되살리는 것이 좋습니다.
-
-## 4. 기타
-
-- 오디오: `miniaudio` 로 동작(`Using: miniaudio for audio playback`). 볼륨/뮤트는 게임 설정 사용.
-- WindBot: 브라우저에서 로컬 실행 불가 → **NAS 패널에서 봇 투입**(`/api/bot/start`) 사용.
-- 사이드 덱 교환은 WindBot/EDOPro 구조상 미지원(기존 프로젝트와 동일한 제약).
+- **서버 대전(HTTP 로비)**: `ServerLobby` 가 `curl` 을 쓰는데 웹 빌드는 `curl-stub` 이라 동작하지 않는다.
+  → **LAN 모드 + WS 브리지**가 유일한 접속 경로.
+- **로컬 호스팅**: 브라우저는 TCP 서버를 열 수 없으므로 "방 만들기"는 실제로는 **멀티롤 서버에 접속**한다.
+  봇은 NAS 패널(`POST /api/bot/start`)로 투입한다.
+- **WindBot**: 브라우저에서 실행 불가(위와 동일).
+- **사이드 덱 교환**: EDOPro/WindBot 구조상 미지원(기존 프로젝트와 동일).
 
 ## 검증 체크리스트(변경 시)
 
 ```bash
-# 1) 빌드
-~/edo-src/ocgwasm/build-gframe-audio.sh && ~/edo-src/ocgwasm/link-default.sh
+# 1) 빌드 (링크 실패는 반드시 확인해야 한다 — 실패해도 cp 는 실행됨)
+~/edo-src/ocgwasm/build-gframe-audio.sh
+~/edo-src/ocgwasm/link-default.sh 2>&1 | grep -E "error|failed" || echo "link clean"
 # 2) 배포
-cd ~/edopro-docker && docker build -t edopro-web:X.Y.Z . && docker rm -f edopro-web && docker run ...
-# 3) 확인
+cd ~/edopro-docker && docker build -t edopro-web:X.Y.Z . && docker rm -f edopro-web
+docker run -d --name edopro-web --restart unless-stopped -p 7556:8080 \
+  -v edopro_pics:/app/piccache -e BRIDGE_TARGET=192.168.0.4:7911 -e REPOS=ProjectIgnis/BabelCDB edopro-web:X.Y.Z
+# 3) 서버 확인
 curl -s -o /dev/null -w "%{http_code}\n" http://192.168.0.53:7556/
-curl -s -o /dev/null -w "%{http_code} %{size_download}\n" http://192.168.0.53:7556/edopro-full.wasm
 curl -s -o /dev/null -w "%{http_code} %{size_download}\n" http://192.168.0.53:7556/img/89631139.jpg
-# 4) 화면
-#    브라우저 → 메뉴(한국어) → LAN + AI → Host/Join → 방 창
+# 4) 화면 확인
+#    메뉴 → 덱 편집(카드 아트) → LAN + AI → 방 만들기 → 확인 → 준비 → 시작 → 듀얼
+#    봇 투입: POST http://192.168.0.4:8090/api/bot/start  {"roomId":N,"deck":"raisemoon"}
 ```

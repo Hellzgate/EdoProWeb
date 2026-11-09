@@ -14,8 +14,8 @@
 
 | 항목 | 값 |
 |---|---|
-| 버전 | **1.0.0** (`VERSION`) |
-| 이미지 | `edopro-web:1.0.0` (약 285MB, `python:3.12-alpine` + `git`) |
+| 버전 | **1.1.0** (`VERSION`) |
+| 이미지 | `edopro-web:1.1.0` (약 285MB, `python:3.12-alpine` + `git`) |
 | 포트 | **7556** → 컨테이너 8080 |
 | 게임 URL | <http://192.168.0.53:7556> |
 | 저장소 관리 | <http://192.168.0.53:7556/repos.html> |
@@ -81,7 +81,7 @@ edopro-web/
 
 ---
 
-## 4. 상태 요약 (v1.0.0)
+## 4. 상태 요약 (v1.1.0)
 
 | 기능 | 상태 |
 |---|---|
@@ -91,7 +91,29 @@ edopro-web/
 | Git 저장소 받기/적용 (`/repos.html`) | ✅ |
 | 오디오(Web Audio) | ✅ |
 | 서버 접속(방 목록/생성, 프로토콜 파싱) | ✅ |
-| 카드 이미지 표시 | ⚠️ 서버 프록시·캐시까지, 클라이언트 표시 미완 |
-| 듀얼 실제 시작 | ⚠️ 디바이스 재시작 경로 미완 |
+| **카드 이미지 표시**(덱 편집기·듀얼) | ✅ v1.1.0 |
+| **듀얼 시작 → 실제 진행**(봇 대전) | ✅ v1.1.0 |
+| 듀얼 필드 마트/카드 뒷면 렌더링 품질 | ⚠️ WebGL 드로우 경로 문제(진행은 정상) |
 
 자세한 원인과 다음 단계는 [docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md).
+
+---
+
+## 5. 변경 이력
+
+### v1.1.0 (2026-11-10)
+
+- **카드 이미지 표시 해결**
+  - `web_fetch_pic` 을 `EM_ASYNC_JS`(Asyncify) → **동기 XHR**(`EM_ASM_INT`)로 교체
+  - THUMB 이 `/pics/field/` 에 저장되던 경로 버그 수정(ART 와 동일한 `pics/<code>.jpg`)
+  - `wait=true` + `preload_status=LOADED` 로 다음 프레임 재사용, 성공 카드만 캐시
+  - 링크 실패 시 옛 wasm 이 조용히 배포되던 문제(`webpics.o` 중복 심볼) 제거
+- **듀얼 시작 해결**
+  - `BUTTON_HOST_CONFIRM` 에서 `NetServer::StartServer()` 생략(wasm 은 `std::thread` 불가)
+  - WS 브리지로 멀티롤 서버에 직결 → 호스트 준비 → 시작 → 듀얼 진행 확인
+- Irrlicht `COGLES2Driver` 에 wasm 전용 VBO 언바인드(부분 개선)
+
+### v1.0.0 (2026-11-09)
+
+- 최초 공개: wasm 빌드, 한국어, 단일 포트 Docker(정적+WS 브리지+Git API), 오디오(miniaudio)
+
