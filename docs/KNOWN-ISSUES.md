@@ -50,28 +50,53 @@ wasm(단일 스레드)에서는 `std::thread` 생성이 예외를 던지고, GUI
 **실측**: 방 만들기 → 확인 → **호스트 준비 창**(플레이어 2명) → 준비 → 시작 → **듀얼 필드 진입**.
 NAS 패널 API 로 봇(`raisemoon`) 투입 후 실제 듀얼 진행(봇 대사·드로우·소환·페이즈 표시 확인).
 
-## 3. 렌더링 — 남은 문제 (기능은 동작)
+## 3. 렌더링 — ✅ 해결 (v1.2.1)
 
-**증상**: 듀얼 필드에서 `GL_INVALID_OPERATION: glDrawElements: Must have element array buffer bound` 와
+**증상(과거)**: 듀얼 필드에서 `GL_INVALID_OPERATION: glDrawElements: Must have element array buffer bound` +
 `vertexAttribPointer: no ARRAY_BUFFER is bound and offset is non-zero` 가 프레임마다 발생하고,
-필드의 **마트(존 테두리)·카드 뒷면 일부**가 어긋나 보인다(배경은 듀얼 시작 연출 이미지가 남는다).
+필드의 **마트(존 테두리)·카드 뒷면**이 그려지지 않아 배경(직전 프레임)만 남았다.
 
-**원인(추정)**: Irrlicht `COGLES2Driver` 의 `drawVertexPrimitiveList()` 가
-`HardwareMappingHint != EHM_NEVER` 상태에서 **VBO 오프셋**을 쓰는데, wasm 빌드에서는 해당 VBO 가 없거나
-`draw2DImage*` 의 **클라이언트 포인터** 경로와 섞여 WebGL 이 이를 잘못 해석한다.
-(데스크톱 GL 은 두 방식을 섞어도 되지만 WebGL 은 안 된다)
+**원인**: 이 빌드는 `EDT_WEBGL1` 드라이버(`CWebGL1Driver`, `irrlicht/src/CWebGL1Driver.cpp`)를 쓰고,
+그 안의 `drawVertexPrimitiveList()` 가 클라이언트 배열 호출을 **의도적으로 무시**하고 있었다.
 
-**시도한 것**: `setRenderStates2DMode()` 진입 시 `ARRAY/ELEMENT_ARRAY_BUFFER` 언바인드,
-`drawVertexPrimitiveList()` 종료 시 언바인드 → **오류는 남음**(188건/198줄).
+```cpp
+os::Printer::log("WebGL driver does not support drawVertexPrimitiveList calls without a VBO", ELL_WARNING);
+```
 
-**다음 후보**
-1. `COGLES2Driver::drawVertexPrimitiveList` 의 `HWBuffer->Mapped_Vertex/Index` 분기를 wasm 에서 **항상 클라이언트 배열**로
-2. `COGLES2Driver::updateHardwareBuffer` 에서 VBO 생성 여부 로그 → 어느 드로우가 문제인지 특정
-3. 근본 회피: `EDT_WEBGL1` 대신 **GLES2 + WebGL2**(`-sMAX_WEBGL_VERSION=2`, `-sMIN_WEBGL_VERSION=2`)로 링크
+EDOPro 는 필드 카드·존·선택선을 `drawVertexPrimitiveList(4 verts, EPT_TRIANGLES, EIT_16BIT)` 로 그리므로
+그 요소들이 **전부 누락**됐다. (COGLES2Driver 쪽 패치는 이 드라이버에 적용되지 않아 효과가 없었다)
 
-> 게임 진행(드로우·소환·페이즈·효과 선택·봇 대화)은 정상 동작하며, 위 문제는 **화면 품질**에 해당한다.
+**수정**: 클라이언트 데이터를 **스트리밍 메시버퍼(VBO)** 로 올려 `drawMeshBuffer()` 로 그린다.
 
-## 4. 그 밖의 제약
+```cpp
+static scene::SMeshBuffer* sb = nullptr;
+if (!sb) sb = new scene::SMeshBuffer();
+sb->Vertices.set_used(0);
+sb->Indices.set_used(0);
+sb->BoundingBox.reset(0.f, 0.f, 0.f);
+sb->append(vertices, vertexCount, static_cast<const u16*>(indexList), primitiveCount * 3);
+sb->setHardwareMappingHint(scene::EHM_STREAM);
+sb->setDirty(scene::EBT_VERTEX_AND_INDEX);
+drawMeshBuffer(sb);
+```
+
+**실측**: 메뉴 화면 `GL_INVALID_OPERATION` **0건**(이전 188건/198줄).
+듀얼 필드의 존 테두리·마트·덱/묘지 더미·손패 카드가 모두 표시되고, 손패/효과 선택/페이즈 진행이 정상.
+
+> 듀얼 시작 시점에 한 번(약 190건) 같은 계열 경고가 남아 있으나 화면에는 영향이 없다(초기 텍스처 업로드 단계).
+
+## 4. 화면 레이아웃 — ✅ 해결 (v1.2.1)
+
+**증상(과거)**: 캔버스가 오른쪽으로 밀리고 창 밖으로 잘렸다(좌측에 검은 여백).
+
+**원인**: Emscripten 셸의 숨은 `<div class="emscripten">`(progress 래퍼)가 flex 행에 남아
+`justify-content:center` 의 중심 계산이 밀렸다. (id 가 없는 래퍼라 기존 `#progress` 숨김 규칙에 걸리지 않음)
+
+**수정**: `body>*{display:none!important}` 후 `.emscripten_border` 만 `position:fixed;inset:0` 로 살리고,
+JS 로 캔버스를 `min(W/1024, H/640)` 배율로 **비율 유지 확대**한다.
+Emscripten 은 마우스 좌표를 `canvas.width / rect.width` 로 환산하므로 확대해도 입력이 정확하다.
+
+## 5. 그 밖의 제약
 
 - **서버 대전(HTTP 로비)**: `ServerLobby` 가 `curl` 을 쓰는데 웹 빌드는 `curl-stub` 이라 동작하지 않는다.
   → **LAN 모드 + WS 브리지**가 유일한 접속 경로.

@@ -54,6 +54,8 @@ extern "C" int web_fetch_pic(int code, int type) {
 | `CSDL2ContextManager.cpp` | `generateContext()` — 첫 컨텍스트를 **static 공유**, `destroyContext()` **무시** | 브라우저는 캔버스당 컨텍스트 1개. EDOPro 가 임시 디바이스를 만들어 컨텍스트를 잃는 문제 |
 | `CIrrDeviceSDL2.cpp` | 창 플래그 `SHOWN`, 캔버스 크기 변경 생략, `SDL_DestroyWindow`/`SDL_Quit` 생략 | OffscreenCanvas/컨텍스트 재사용, 페이지 수명 동안 창 유지 |
 | `Irrlicht.cpp` | `createDeviceEx` 에 `[dev]` 진단 로그 | 디바이스 생성/드라이버 확인 |
+| `CWebGL1Driver.cpp` | `drawVertexPrimitiveList()` — 클라이언트 배열을 **스트리밍 VBO(SMeshBuffer)** 로 올려 렌더 | 원래 이 함수는 WebGL 에서 **호출을 통째로 무시**해 필드 마트·카드가 안 그려졌다 |
+| `COGLES2Driver.cpp` | (`EDT_WEBGL1` 빌드에는 적용되지 않음 — 참고용으로만 남겨둠) | 2D/3D 버퍼 바인딩 정리 시도 |
 | `COGLES2Driver.cpp` | 2D 렌더 상태 진입/`drawVertexPrimitiveList` 종료에서 **VBO 언바인드**(wasm) | WebGL 은 클라이언트 포인터와 바인딩된 버퍼를 섞을 수 없다(부분 개선, `KNOWN-ISSUES` §3) |
 
 > Irrlicht 는 zip 배포판(`1.9-custom`)이라 git diff 가 없어 **파일 전체 교체** 방식입니다.
@@ -76,9 +78,9 @@ extern "C" int web_fetch_pic(int code, int type) {
 | `irrlicht/src/lzma/LzmaEnc.c` 등 | 일부만 사용 | gframe/lzma 를 별도 컴파일 |
 | `webpics.c` | v1.1.0 에서 `web_fetch_pic` 을 `image_manager.cpp` 로 옮겨 **중복 심볼 제거** | (삭제) |
 
-## 5. 런타임 주입 (HTML 후처리, `scripts/link-default.sh` → `patch_shell_post.py`)
+## 5. 런타임 주입 (HTML 후처리, `scripts/link-default.sh` → `scripts/patch_shell_post.py`)
 
-- 셸 크롬(로고·컨트롤·로그창) 숨김 CSS, 캔버스 1024×640 중앙
+- 셸 크롬(로고·컨트롤·로그창) **전부 숨김** (`body>*{display:none}`) + `.emscripten_border` 만 `position:fixed;inset:0`
+- 캔버스를 `min(W/1024, H/640)` 배율로 **비율 유지 확대**(`window.__edoproFit`, resize/MutationObserver 대응)
 - `window.EDOPRO_WS_BASE = ws(s)://<host>/ws`
 - `Module.arguments = ['-i-want-to-be-admin']` (wasm 에서 `getuid()==0` 이라 root 판정 회피)
-- `window.__edoproFetchPic(code, type)` — (v1.0.0 잔재, 현재 C++ 는 동기 XHR 사용)
