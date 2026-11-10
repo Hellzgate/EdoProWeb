@@ -1,0 +1,88 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>봇 대전 — EDOPro Web</title>
+<style>
+body{font:14px 'Malgun Gothic',sans-serif;background:#16181d;color:#e6e8ee;margin:0;padding:24px}
+h1{font-size:18px;margin:0 0 4px}p.sub{color:#9aa1ad;margin:0 0 18px}
+table{border-collapse:collapse;width:100%;max-width:1080px}
+th,td{padding:8px 10px;border-bottom:1px solid #2b2f38;text-align:left}
+th{background:#1e222a;color:#aeb6c2;font-size:12px;font-weight:600}
+code{background:#11141a;padding:2px 6px;border-radius:4px;color:#9fd0ff}
+.box{max-width:1080px;background:#1b1f26;border:1px solid #2b2f38;border-radius:8px;padding:14px;margin:18px 0}
+.box h2{font-size:14px;margin:0 0 10px;color:#cfd6e2}
+button{background:#2b6cb0;color:#fff;border:0;border-radius:6px;padding:6px 12px;font:13px 'Malgun Gothic';cursor:pointer}
+button:hover{background:#3479c2}
+button.ghost{background:#2a2f3a}button.ghost:hover{background:#353b48}
+button:disabled{opacity:.45;cursor:default}
+select,input{background:#12151a;border:1px solid #333a45;color:#e6e8ee;border-radius:6px;padding:6px 8px;font:13px 'Malgun Gothic'}
+#log{white-space:pre-wrap;color:#9aa1ad;font:12px Consolas,monospace;margin-top:10px;max-height:170px;overflow:auto}
+.badge{display:inline-block;border-radius:999px;padding:1px 9px;font-size:12px;border:1px solid #2f4a2f;background:#1f2a1f;color:#8fd08f}
+.badge.no{border-color:#4a2f2f;background:#2a1f1f;color:#ff9a9a}
+</style>
+<h1>봇 대전 (서버 방에 AI 넣기)</h1>
+<p class="sub">브라우저는 WindBot 을 직접 실행할 수 없습니다. 대신 멀티롤 패널 API 로 <b>서버 방에 봇을 투입</b>합니다.
+게임에서 <code>LAN + AI 대전 → 방 만들기 → 확인</code> 으로 방을 만든 뒤 여기서 봇을 넣으세요.</p>
+
+<div class="box">
+  <h2>패널 상태</h2>
+  <div id="state">확인 중…</div>
+</div>
+
+<div class="box">
+  <h2>열려 있는 방</h2>
+  <table><thead><tr><th>방</th><th>참가자</th><th>상태</th><th>봇</th><th></th></tr></thead><tbody id="rooms"></tbody></table>
+  <div style="margin-top:12px">
+    <select id="deck"></select>
+    <button class="ghost" id="reload">새로 고침</button>
+    <button class="ghost" id="stopAll">전체 봇 중지</button>
+  </div>
+  <div id="log"></div>
+</div>
+
+<script>
+function log(m){ var el=document.getElementById('log'); el.textContent = m + (el.textContent ? '\n'+el.textContent : ''); }
+async function jfetch(u, opt){ const r = await fetch(u, opt); try { return await r.json(); } catch(e) { return { error: 'bad response' }; } }
+
+async function load(){
+  const st = document.getElementById('state');
+  const rooms = await jfetch('/api/bot/rooms');
+  if (rooms.error) { st.innerHTML = '<span class="badge no">패널 연결 안 됨</span> ' + rooms.error; return; }
+  const bots = await jfetch('/api/bot/decks');
+  st.innerHTML = '<span class="badge">패널 연결됨</span> 덱 ' + ((bots.catalog||[]).length) + '종 · 실행 중 ' + ((bots.running||[]).length) + '개';
+
+  const sel = document.getElementById('deck');
+  const cur = sel.value;
+  sel.innerHTML = (bots.catalog||[]).map(x => `<option value="${x.deck}">${x.deck} — ${x.name||''}</option>`).join('');
+  if (cur) sel.value = cur;
+
+  const tb = document.getElementById('rooms');
+  const list = rooms.rooms || [];
+  tb.innerHTML = list.map(r => {
+    const users = (r.users||[]).join(', ') || '(없음)';
+    const stt = r.started ? '진행 중' : '대기';
+    const bot = r.bot ? `<span class="badge">${r.bot}</span>` : '<span class="badge no">없음</span>';
+    return `<tr><td><b>${r.id}</b>${r.notes ? ' — ' + r.notes : ''}${r.needpass ? ' 🔒' : ''}</td>` +
+           `<td>${users}</td><td>${stt}</td><td>${bot}</td>` +
+           `<td><button data-room="${r.id}" ${r.started ? 'disabled' : ''}>봇 투입</button></td></tr>`;
+  }).join('') || '<tr><td colspan=5 style="color:#7c8593">열린 방이 없습니다 — 게임에서 방을 먼저 만드세요</td></tr>';
+
+  tb.querySelectorAll('button[data-room]').forEach(b => {
+    b.onclick = async () => {
+      const roomId = Number(b.dataset.room), deck = document.getElementById('deck').value;
+      b.disabled = true;
+      const r = await jfetch('/api/bot/start', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ roomId, deck }) });
+      log(r.ok ? `방 ${roomId} ← ${deck} 투입` : `실패: ${r.error || JSON.stringify(r)}`);
+      setTimeout(load, 1500);
+    };
+  });
+}
+
+document.getElementById('reload').onclick = load;
+document.getElementById('stopAll').onclick = async () => {
+  const r = await jfetch('/api/bot/stopall', { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' });
+  log('전체 중지: ' + JSON.stringify(r));
+  setTimeout(load, 1200);
+};
+load();
+setInterval(load, 10000);
+</script>

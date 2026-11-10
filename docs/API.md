@@ -74,6 +74,10 @@
 저장소 파일을 게임 경로로 매핑한 번들: `{"files": {"expansions/<repo>__x.cdb": "<base64>", ...}, "count": N, "bytes": B}`
 `ETag` 를 주며 `If-None-Match` 가 맞으면 `304`. 게임은 부팅 시 이 번들을 MEMFS 에 넣는다.
 
+### `GET /api/bot/rooms` · `GET /api/bot/decks` · `POST /api/bot/start|stop|stopall` (v1.8.0)
+멀티롤 웹 패널 API 프록시(`BOT_PANEL_URL` + `BOT_PANEL_TOKEN`). 게임 화면은 건드리지 않고
+**서버 방에 봇을 투입**한다. `/bot` 페이지가 이 API 를 사용한다.
+
 ## 참고
 
 - 정적 응답에는 `Cross-Origin-Opener-Policy: same-origin`,

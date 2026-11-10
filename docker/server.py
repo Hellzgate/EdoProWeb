@@ -39,6 +39,9 @@ LOBBY_UPSTREAM = os.environ.get("LOBBY_UPSTREAM", "http://192.168.0.4:7922").rst
 BRIDGE_ALLOW_ANY = os.environ.get("BRIDGE_ALLOW_ANY", "1") == "1"
 BRIDGE_FORCE = os.environ.get("BRIDGE_FORCE", "0") == "1"
 LOBBY_ALLOW_ANY = os.environ.get("LOBBY_ALLOW_ANY", "1") == "1"
+# 봇 투입(멀티롤 웹 패널 API) — 없으면 봇 기능 비활성
+BOT_PANEL_URL = os.environ.get("BOT_PANEL_URL", "").rstrip("/")
+BOT_PANEL_TOKEN = os.environ.get("BOT_PANEL_TOKEN", "")
 # 덱/리플레이 등 사용자 데이터 보관 폴더(볼륨 권장)
 USERDATA_DIR = os.environ.get("USERDATA_DIR", "/app/userdata")
 USERDATA_PREFIXES = ("deck/", "replay/", "puzzles/")
@@ -405,6 +408,28 @@ async def auto_sync_repos():
             log("repo auto-update done")
         except Exception as e:
             log("repo auto-update failed:", e)
+
+
+
+# ---------------- 봇 패널 프록시 ----------------
+def _bot_request(method, path, payload=None):
+    import urllib.request
+    if not BOT_PANEL_URL:
+        return None, "BOT_PANEL_URL 이 설정되지 않았습니다"
+    url = BOT_PANEL_URL + path
+    data = None
+    headers = {"User-Agent": "edopro-web"}
+    if BOT_PANEL_TOKEN:
+        headers["X-MR-Token"] = BOT_PANEL_TOKEN
+    if payload is not None:
+        data = json.dumps(payload).encode()
+        headers["Content-Type"] = "application/json"
+    try:
+        req = urllib.request.Request(url, data=data, headers=headers, method=method)
+        with urllib.request.urlopen(req, timeout=12) as r:
+            return r.read(), None
+    except Exception as e:
+        return None, str(e)
 
 def ws_frame(payload, opcode=0x2):
     n = len(payload)
@@ -804,6 +829,36 @@ async def handle(reader, writer):
             writer.close()
             return
 
+
+        # ---- 봇 투입 (멀티롤 패널 프록시) ----
+        if path in ("/api/bot/rooms", "/api/bot/decks", "/api/bot/start", "/api/bot/stopall", "/api/bot/stop"):
+            if path == "/api/bot/rooms":
+                data, err = await asyncio.get_event_loop().run_in_executor(None, _bot_request, "GET", "/api/rooms")
+            elif path == "/api/bot/decks":
+                data, err = await asyncio.get_event_loop().run_in_executor(None, _bot_request, "GET", "/api/bots")
+            else:
+                length = int(headers.get("content-length", "0") or 0)
+                raw = rest or b""
+                while len(raw) < length:
+                    chunk = await reader.read(length - len(raw))
+                    if not chunk:
+                        break
+                    raw += chunk
+                try:
+                    payload = json.loads(raw.decode() or "{}")
+                except Exception:
+                    payload = {}
+                sub = {"start": "/api/bot/start", "stop": "/api/bot/stop", "stopall": "/api/bot/stopall"}[path.split("/")[-1]]
+                data, err = await asyncio.get_event_loop().run_in_executor(None, _bot_request, "POST", sub, payload)
+            if err:
+                body = json.dumps({"error": err}, ensure_ascii=False).encode()
+                writer.write(resp(502, "Bad Gateway", body, "application/json; charset=utf-8"))
+            else:
+                writer.write(resp(200, "OK", data or b"{}", "application/json; charset=utf-8", "Cache-Control: no-store\r\n"))
+            await writer.drain()
+            writer.close()
+            return
+
         # ---- static ----
         if method not in ("GET", "HEAD"):
             writer.write(resp(405, "Method Not Allowed"))
@@ -813,6 +868,8 @@ async def handle(reader, writer):
 
         if path == "/":
             path = "/edopro-full.html"
+        if path == "/bot":
+            path = "/bot.html"
         safe = posixpath.normpath(path).lstrip("/")
         if safe.startswith(".."):
             safe = "edopro-full.html"
