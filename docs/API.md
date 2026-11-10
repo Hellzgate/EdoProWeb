@@ -12,6 +12,7 @@
 | `REPO_ROOT` | `/app/repos` | git clone 저장 위치 |
 | `REPOS` | `ProjectIgnis/BabelCDB` | 기동 시 자동으로 받을 저장소(쉼표 구분) |
 | `PIC_CACHE` | `/app/piccache` | 카드 이미지 캐시(볼륨 권장) |
+| `LOBBY_UPSTREAM` | `http://192.168.0.4:7922` | 서버 대전 방 목록을 가져올 서버(멀티롤 roomlist) |
 
 ## 엔드포인트
 
@@ -48,6 +49,11 @@
 ### `GET /api/repos.tar`
 `/app/repos` 아래 저장소들을 `repositories/<name>/...` 경로로 묶은 tar.
 (과거에는 게임 부팅 시 MEMFS 에 마운트했으나, 현재는 사용하지 않음 — KNOWN-ISSUES 참고)
+
+### `GET /api/getrooms` (v1.3.0)
+서버 대전(온라인) 방 목록. `LOBBY_UPSTREAM`(기본 `http://192.168.0.4:7922`)의 `/api/getrooms` 를 그대로 중계한다.
+브라우저는 CORS 때문에 멀티롤 API 를 직접 부를 수 없어 **같은 오리진**으로 우회한다.
+게임(`ServerLobby`)은 이 응답 `{"rooms":[...]}` 를 그대로 파싱한다.
 
 ## 참고
 

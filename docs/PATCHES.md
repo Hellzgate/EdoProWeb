@@ -18,6 +18,7 @@
 | `image_downloader.cpp` | 스레드 생성/조인 생략 | 동일(스레드 불가) |
 | `image_manager.cpp` | 스레드 생략 · **동기 로딩**(`wait=true`) · **`preload_status=LOADED`** · **`web_fetch_pic` = 동기 XHR** | 이미지 스레드가 없어 카드 그림이 로딩되지 않음(§v1.1.0) |
 | `menu_handler.cpp` | `BUTTON_HOST_CONFIRM` 에서 **`NetServer::StartServer` 생략**(wasm) | 내부 `std::thread` 가 예외 → 메인 루프 붕괴(듀얼 시작 불가) |
+| `server_lobby.cpp` | **서버 대전**: 방 목록을 **동기 XHR**(`EM_ASM_INT` → MEMFS → `ifstream`)로, 스레드 없이 실행 | wasm 은 `epro::thread` 불가 + `curl` 스텁 → 목록이 항상 비어 있었다 |
 | `edopro_main.cpp` | `real_main` 에 catch-all(진단용) | 초기 예외 원인 파악 |
 | `gframe.cpp` | `[flow]` 진단 로그 | 초기화 단계 추적 |
 | `data_handler.cpp` | `[flow]` 진단 로그 | 동일 |

@@ -96,10 +96,45 @@ drawMeshBuffer(sb);
 JS 로 캔버스를 `min(W/1024, H/640)` 배율로 **비율 유지 확대**한다.
 Emscripten 은 마우스 좌표를 `canvas.width / rect.width` 로 환산하므로 확대해도 입력이 정확하다.
 
-## 5. 그 밖의 제약
+## 5. 서버 대전(온라인) — ✅ 해결 (v1.3.0)
 
-- **서버 대전(HTTP 로비)**: `ServerLobby` 가 `curl` 을 쓰는데 웹 빌드는 `curl-stub` 이라 동작하지 않는다.
-  → **LAN 모드 + WS 브리지**가 유일한 접속 경로.
+**증상(과거)**: `서버 대전` 화면은 뜨지만 서버 목록이 EU/US 기본값이고, 방 목록은 항상 비어 있었다.
+
+**원인 2개**
+1. `ServerLobby::GetRoomsThread()` 가 **`epro::thread` + `curl`** 로 목록을 받아온다
+   → wasm 은 스레드가 없고 `curl` 은 스텁(항상 실패) → 목록이 비어 있음
+2. 브라우저는 다른 오리진(멀티롤 `:7922`)을 **CORS** 때문에 직접 호출할 수 없다
+
+**수정**
+- `RefreshRooms()` → wasm 에서는 스레드 없이 `GetRoomsThread()` 를 **동기 호출**
+- HTTP 는 **동기 XHR** 로 구현 (`server_lobby.cpp`):
+  ```cpp
+  /* emscripten_fetch 의 동기 모드는 responseType=arraybuffer 때문에 XHR 예외로 null 을 반환한다 */
+  const int len = EM_ASM_INT({
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', UTF8ToString($0), false);   // 동기
+      xhr.overrideMimeType('text/plain; charset=x-user-defined');
+      xhr.send(null);
+      if (xhr.status !== 200) return -1;
+      /* 바이너리 -> Uint8Array -> MEMFS /tmp/getrooms.json */
+      Module.FS.writeFile('/tmp/getrooms.json', arr);
+      return arr.length;
+  }, path.c_str());
+  std::ifstream in("/tmp/getrooms.json", std::ios::binary);  // FILE* 는 헤더 충돌로 사용 불가
+  ```
+  URL 은 **경로만**(`/api/getrooms`) 사용해 현재 페이지 오리진에서 요청 → CORS 회피
+- `server.py` 에 **`/api/getrooms` 프록시** 추가 (`LOBBY_UPSTREAM`, 기본 `http://192.168.0.4:7922`)
+- `config/user_configs.json` 에 `servers` 항목(서버 1개 = NAS Multirole) — `assets/user_configs.json` 참고.
+  이 파일은 **preload 되어 `.data` 에 들어가므로** 바꾸면 재링크가 필요하다.
+
+**실측**: `[lobby] GET /api/getrooms ok 434B` → 표에 1행(프리릴리즈 · [1vs1] · MR5 · N/A · Player · 열림) 표시.
+행 선택 → **들어가기** → 호스트 준비 창(2명) → 준비 → 시작 → 듀얼 진행.
+**방 만들기**도 서버에 방이 생성되고(`roomid 1`) 목록 API 로 확인됨.
+
+> 서버 목록은 `user_configs.json` 의 `servers` 배열이 **전부**이므로, 다른 서버를 쓰려면 그 파일을 고쳐 재링크한다.
+
+## 6. 그 밖의 제약
+
 - **로컬 호스팅**: 브라우저는 TCP 서버를 열 수 없으므로 "방 만들기"는 실제로는 **멀티롤 서버에 접속**한다.
   봇은 NAS 패널(`POST /api/bot/start`)로 투입한다.
 - **WindBot**: 브라우저에서 실행 불가(위와 동일).

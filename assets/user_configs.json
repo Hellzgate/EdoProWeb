@@ -1,0 +1,14 @@
+{
+	"repos": [],
+	"urls": [],
+	"servers": [
+		{
+			"name": "NAS Multirole",
+			"address": "127.0.0.1",
+			"roomaddress": "127.0.0.1",
+			"roomlistport": 7556,
+			"duelport": 7911,
+			"roomlistprotocol": "http"
+		}
+	]
+}

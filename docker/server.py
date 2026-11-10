@@ -32,6 +32,7 @@ ROOT = os.environ.get("ROOT", "/app/web")
 BRIDGE_TARGET = os.environ.get("BRIDGE_TARGET", "").strip()
 REPO_ROOT = os.environ.get("REPO_ROOT", "/app/repos")
 DEFAULT_REPOS = [r.strip() for r in os.environ.get("REPOS", "ProjectIgnis/BabelCDB").split(",") if r.strip()]
+LOBBY_UPSTREAM = os.environ.get("LOBBY_UPSTREAM", "http://192.168.0.4:7922").rstrip("/")
 
 MIME = {
     ".html": "text/html; charset=utf-8", ".js": "application/javascript",
@@ -90,7 +91,23 @@ def log(*a):
     print("[web]", *a, flush=True)
 
 
-# ---------------- WebSocket ----------------
+def fetch_lobby_rooms():
+    """멀티롤(또는 호환 서버)의 방 목록 JSON 을 그대로 가져온다.
+
+    EDOPro 는 `<roomlistprotocol>://<roomaddress>:<roomlistport>/api/getrooms` 를 호출하고
+    응답 `{"rooms":[...]}` 를 그대로 파싱한다.
+    """
+    import urllib.request
+    url = LOBBY_UPSTREAM + "/api/getrooms"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "edopro-web"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            data = r.read()
+        if data:
+            return data
+    except Exception as e:
+        log("lobby fetch failed:", e)
+    return None
 def ws_frame(payload, opcode=0x2):
     n = len(payload)
     if n < 126:
@@ -350,6 +367,18 @@ async def handle(reader, writer):
                 writer.write(resp(200, "OK", data, ctype, "Cache-Control: max-age=604800\r\n"))
             else:
                 writer.write(resp(404, "Not Found", b""))
+            await writer.drain()
+            writer.close()
+            return
+
+        # ---- 서버 대전(온라인) 방 목록 프록시 : <LOBBY_UPSTREAM>/api/getrooms ----
+        # 브라우저는 CORS 때문에 멀티롤 API 를 직접 못 부르므로 같은 오리진에서 중계한다.
+        if path == "/api/getrooms":
+            data = await asyncio.get_event_loop().run_in_executor(None, fetch_lobby_rooms)
+            if data is None:
+                writer.write(resp(502, "Bad Gateway", b'{"rooms":[]}', "application/json; charset=utf-8"))
+            else:
+                writer.write(resp(200, "OK", data, "application/json; charset=utf-8", "Cache-Control: no-store\r\n"))
             await writer.drain()
             writer.close()
             return

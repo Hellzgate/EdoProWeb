@@ -88,6 +88,27 @@ numfont = fonts/NotoSansKR-Regular.otf
 language = Korean
 ```
 
+
+### 서버 대전(온라인) 서버 목록 — `config/user_configs.json`
+
+`서버 대전` 화면의 서버 콤보는 `configs.json` + `user_configs.json` 의 **`servers` 배열**에서 온다.
+웹 배포에서는 아래처럼 **한 대(멀티롤)** 만 넣는다. 이 파일은 `--preload-file` 로 `.data` 에 들어가므로 수정 후 **재링크**가 필요하다.
+
+```json
+{
+  "repos": [], "urls": [],
+  "servers": [
+    { "name": "NAS Multirole", "address": "127.0.0.1", "roomaddress": "127.0.0.1",
+      "roomlistport": 7556, "duelport": 7911, "roomlistprotocol": "http" }
+  ]
+}
+```
+
+- `address`/`duelport` 는 실제 TCP 대상이지만, 컨테이너의 **WS 브리지(BRIDGE_TARGET)** 가 목적지를 덮어쓴다.
+- `roomaddress`/`roomlistport` 는 방 목록 URL 을 만들 때만 쓰이고, wasm 구현은 **경로만** 사용해 현재 오리진에서 요청한다(CORS 회피).
+- 목록은 `server.py` 의 `/api/getrooms` 프록시가 `LOBBY_UPSTREAM`(기본 `http://192.168.0.4:7922`)에서 가져온다.
+- 예시 파일: `assets/user_configs.json`
+
 ## 6. 빌드
 
 ```bash

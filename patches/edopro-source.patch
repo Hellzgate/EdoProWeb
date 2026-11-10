@@ -478,6 +478,110 @@ index 7b3360f..5c7c900 100644
  						break;
  					}
  					DuelClient::is_local_host = true;
+diff --git a/gframe/server_lobby.cpp b/gframe/server_lobby.cpp
+index 9b0ed21..fff0280 100644
+--- a/gframe/server_lobby.cpp
++++ b/gframe/server_lobby.cpp
+@@ -1,3 +1,5 @@
++#include <fstream>
++#include <iterator>
+ #include <nlohmann/json.hpp>
+ #include <IGUITable.h>
+ #include <IGUIEditBox.h>
+@@ -21,6 +23,50 @@
+ 
+ namespace ygo {
+ 
++#ifdef __EMSCRIPTEN__
++#include <emscripten.h>
++#include <emscripten/fetch.h>
++
++/* [web] 브라우저에서 방 목록을 가져온다.
++   - curl 은 스텁이라 사용할 수 없다
++   - emscripten_fetch 의 동기 모드는 responseType(arraybuffer) 때문에 XHR 예외로 **null 을 돌려준다**
++     -> 동기 XHR + charset=x-user-defined 로 받아 MEMFS 에 쓰고, C++ 에서 읽는다 (카드 이미지와 같은 방식)
++   - CORS 회피를 위해 URL 의 경로만 사용해 현재 페이지 오리진에서 요청한다 */
++static bool WebHttpGetPath(const std::string& url, std::string& out) {
++	auto pos = url.find("/api/");
++	std::string path = (pos == std::string::npos) ? url : url.substr(pos);
++	const int len = EM_ASM_INT({
++		try {
++			var p = UTF8ToString($0);
++			var xhr = new XMLHttpRequest();
++			xhr.open('GET', p, false);
++			xhr.overrideMimeType('text/plain; charset=x-user-defined');
++			xhr.send(null);
++			if (xhr.status !== 200) {
++				console.log('[lobby] GET ' + p + ' status=' + xhr.status);
++				return -1;
++			}
++			var txt = xhr.responseText || '';
++			var arr = new Uint8Array(txt.length);
++			for (var i = 0; i < txt.length; i++) arr[i] = txt.charCodeAt(i) & 0xff;
++			Module.FS.writeFile('/tmp/getrooms.json', arr);
++			console.log('[lobby] GET ' + p + ' ok ' + arr.length + 'B');
++			return arr.length;
++		} catch (e) {
++			console.log('[lobby] err ' + e);
++			return -2;
++		}
++	}, path.c_str());
++	if (len <= 0)
++		return false;
++	std::ifstream in("/tmp/getrooms.json", std::ios::binary);
++	if (!in)
++		return false;
++	out.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
++	return !out.empty();
++}
++#endif
++
+ std::vector<RoomInfo> ServerLobby::roomsVector;
+ std::vector<ServerInfo> ServerLobby::serversVector;
+ std::atomic_bool ServerLobby::is_refreshing{ false };
+@@ -176,6 +222,21 @@ void ServerLobby::GetRoomsThread() {
+ 	mainGame->roomListTable->setVisible(false);
+ 
+ 	std::string retrieved_data;
++#ifdef __EMSCRIPTEN__
++	const auto url = epro::format("{}://{}:{}/api/getrooms", serverInfo.GetProtocolString(), serverInfo.roomaddress, serverInfo.roomlistport);
++	const bool fetch_ok = WebHttpGetPath(url, retrieved_data);
++	if(!fetch_ok) {
++		if(gGameConfig->logDownloadErrors)
++			ErrorLog("Error updating the room list: web fetch failed ({})", url);
++		mainGame->PopupMessage(gDataManager->GetSysString(2037));
++		mainGame->btnLanRefresh2->setEnabled(true);
++		mainGame->serverChoice->setEnabled(true);
++		mainGame->roomListTable->setVisible(true);
++		is_refreshing = false;
++		has_refreshed = true;
++		return;
++	}
++#else
+ 	char curl_error_buffer[CURL_ERROR_SIZE];
+ 	auto curl_handle = curl_easy_init();
+ 	curl_easy_setopt(curl_handle, CURLOPT_ERRORBUFFER, curl_error_buffer);
+@@ -207,6 +268,7 @@ void ServerLobby::GetRoomsThread() {
+ 		has_refreshed = true;
+ 		return;
+ 	}
++#endif
+ 
+ 	roomsVector.clear();
+ 	try {
+@@ -267,7 +329,12 @@ void ServerLobby::RefreshRooms() {
+ 	is_refreshing = true;
+ 	mainGame->roomListTable->clearRows();
+ 	GUIUtils::ChangeCursor(mainGame->device.get(), irr::gui::ECI_WAIT);
++#ifdef __EMSCRIPTEN__
++	/* [web] 스레드가 없으므로 동기로 가져온다 */
++	GetRoomsThread();
++#else
+ 	epro::thread(GetRoomsThread).detach();
++#endif
+ }
+ bool ServerLobby::HasRefreshedRooms() {
+ 	return has_refreshed;
 diff --git a/gframe/utils_gui.cpp b/gframe/utils_gui.cpp
 index 9d561e5..e4d0a4c 100644
 --- a/gframe/utils_gui.cpp
