@@ -352,7 +352,7 @@ index 4eae2f8..c52426f 100644
  void ImageDownloader::AddDownloadResource(PicSource src) {
  	pic_urls.push_back(src);
 diff --git a/gframe/image_manager.cpp b/gframe/image_manager.cpp
-index aed71e8..e017ef6 100644
+index aed71e8..5d71354 100644
 --- a/gframe/image_manager.cpp
 +++ b/gframe/image_manager.cpp
 @@ -44,15 +44,66 @@ irr::s32 toPow2(irr::video::IVideoDriver* driver, irr::s32 size) {
@@ -454,6 +454,17 @@ index aed71e8..e017ef6 100644
  					if(chk)
  						*chk = 1;
  				} else {
+@@ -738,6 +800,10 @@ irr::video::ITexture* ImageManager::GetTextureCard(uint32_t code, imgType type,
+ irr::video::ITexture* ImageManager::GetTextureField(uint32_t code) {
+ 	if(code == 0)
+ 		return nullptr;
++#ifdef __EMSCRIPTEN__
++	/* [web] 필드 마법 일러도 서버에서 받아 pics/field/<code>.jpg 로 저장 */
++	WebFetchCardImage(code, 1);
++#endif
+ 	auto tit = tFields.find(code);
+ 	if(tit != tFields.end())
+ 		return tit->second;
 diff --git a/gframe/menu_handler.cpp b/gframe/menu_handler.cpp
 index 7b3360f..5c7c900 100644
 --- a/gframe/menu_handler.cpp

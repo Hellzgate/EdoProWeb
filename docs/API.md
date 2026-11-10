@@ -55,6 +55,12 @@
 브라우저는 CORS 때문에 멀티롤 API 를 직접 부를 수 없어 **같은 오리진**으로 우회한다.
 게임(`ServerLobby`)은 이 응답 `{"rooms":[...]}` 를 그대로 파싱한다.
 
+### `GET|POST /api/userdata` (v1.5.0)
+덱(`deck/`)·리플레이(`replay/`) 파일 보관.
+- GET: `{"files": {"deck/foo.ydk": "<base64>", ...}}`
+- POST: 같은 형식 본문 → `{"saved": N}`
+- 저장 위치 `USERDATA_DIR`(기본 `/app/userdata`, 볼륨 권장), 경로·길이 검증(최대 32MB)
+
 ## 참고
 
 - 정적 응답에는 `Cross-Origin-Opener-Policy: same-origin`,

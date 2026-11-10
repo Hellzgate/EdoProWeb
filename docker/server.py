@@ -39,6 +39,10 @@ LOBBY_UPSTREAM = os.environ.get("LOBBY_UPSTREAM", "http://192.168.0.4:7922").rst
 BRIDGE_ALLOW_ANY = os.environ.get("BRIDGE_ALLOW_ANY", "1") == "1"
 BRIDGE_FORCE = os.environ.get("BRIDGE_FORCE", "0") == "1"
 LOBBY_ALLOW_ANY = os.environ.get("LOBBY_ALLOW_ANY", "1") == "1"
+# 덱/리플레이 등 사용자 데이터 보관 폴더(볼륨 권장)
+USERDATA_DIR = os.environ.get("USERDATA_DIR", "/app/userdata")
+USERDATA_PREFIXES = ("deck/", "replay/")
+USERDATA_MAX_BYTES = 32 * 1024 * 1024
 
 MIME = {
     ".html": "text/html; charset=utf-8", ".js": "application/javascript",
@@ -126,6 +130,72 @@ def fetch_lobby_rooms(host=None, port=None, proto="http"):
     except Exception as e:
         log("lobby fetch failed:", url, e)
     return None
+
+# ---------------- 사용자 데이터(덱/리플레이) ----------------
+def _ud_path(rel):
+    """USERDATA_DIR 안의 안전한 상대 경로만 허용."""
+    if not rel or rel.startswith("/") or ".." in rel.split("/"):
+        return None
+    if not rel.startswith(USERDATA_PREFIXES):
+        return None
+    # 파일시스템 이름 길이 제한(255B) — 일부 프리로드 덱 이름이 깨져 길어진다
+    if len(rel.encode("utf-8", "surrogatepass")) > 200:
+        return None
+    return os.path.join(USERDATA_DIR, rel.replace("/", os.sep))
+
+
+def load_userdata():
+    out = {}
+    total = 0
+    if not os.path.isdir(USERDATA_DIR):
+        return out
+    for root, _dirs, files in os.walk(USERDATA_DIR):
+        for name in files:
+            full = os.path.join(root, name)
+            rel = os.path.relpath(full, USERDATA_DIR).replace(os.sep, "/")
+            try:
+                size = os.path.getsize(full)
+            except OSError:
+                continue
+            if size > 4 * 1024 * 1024 or total + size > USERDATA_MAX_BYTES:
+                continue
+            try:
+                with open(full, "rb") as f:
+                    out[rel] = base64.b64encode(f.read()).decode()
+                total += size
+            except OSError:
+                continue
+    return out
+
+
+def save_userdata(payload):
+    files = (payload or {}).get("files") or {}
+    saved = 0
+    total = 0
+    for rel, b64 in files.items():
+        path = _ud_path(str(rel))
+        if not path or not isinstance(b64, str):
+            continue
+        try:
+            data = base64.b64decode(b64, validate=False)
+        except Exception:
+            continue
+        if total + len(data) > USERDATA_MAX_BYTES:
+            break
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            tmp = path + ".tmp"
+            with open(tmp, "wb") as f:
+                f.write(data)
+            os.replace(tmp, path)
+            saved += 1
+            total += len(data)
+        except OSError as e:
+            log(f"userdata skip {rel!r} (len={len(path)}) {e!r}")
+    log(f"userdata saved {saved} files ({total}B)")
+    return saved
+
+
 def ws_frame(payload, opcode=0x2):
     n = len(payload)
     if n < 126:
@@ -432,6 +502,30 @@ async def handle(reader, writer):
                 writer.write(resp(502, "Bad Gateway", b'{"rooms":[]}', "application/json; charset=utf-8"))
             else:
                 writer.write(resp(200, "OK", data, "application/json; charset=utf-8", "Cache-Control: no-store\r\n"))
+            await writer.drain()
+            writer.close()
+            return
+
+
+        # ---- 사용자 데이터(덱/리플레이) 보관 ----
+        if path == "/api/userdata":
+            if method == "POST":
+                length = int(headers.get("content-length", "0") or 0)
+                raw = rest or b""
+                while len(raw) < length:
+                    chunk = await reader.read(length - len(raw))
+                    if not chunk:
+                        break
+                    raw += chunk
+                try:
+                    payload = json.loads(raw.decode() or "{}")
+                except Exception:
+                    payload = {}
+                n = save_userdata(payload)
+                body = json.dumps({"saved": n}, ensure_ascii=False).encode()
+            else:
+                body = json.dumps({"files": load_userdata()}, ensure_ascii=False).encode()
+            writer.write(resp(200, "OK", body, "application/json; charset=utf-8", "Cache-Control: no-store\r\n"))
             await writer.drain()
             writer.close()
             return

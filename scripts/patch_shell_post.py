@@ -1,10 +1,13 @@
 import io
-
-p = "/home/hellzsub/edo-docker/web/edopro-full.html"
 import os
-if not os.path.exists(p):
-    p = "/home/hellzsub/edopro-docker/web/edopro-full.html"
+import re
 
+CANDIDATES = [
+    "/home/hellzsub/edopro-docker/web/edopro-full.html",
+    "/home/hellzsub/edo-docker/web/edopro-full.html",
+]
+
+p = next((c for c in CANDIDATES if os.path.exists(c)), CANDIDATES[0])
 s = io.open(p, encoding="utf-8").read()
 
 CSS = (
@@ -16,16 +19,32 @@ CSS = (
     "align-items:center;justify-content:center;border:0!important;background:#000}"
     "canvas.emscripten{border:0 none;background:#000;outline:none;display:block;"
     "width:1024px;height:640px}"
+    "#edopro-toast{display:block!important;position:fixed;left:50%;bottom:28px;"
+    "transform:translateX(-50%);max-width:70vw;padding:9px 16px;border-radius:8px;"
+    "background:rgba(20,22,28,.92);color:#e8eaf0;font:13px/1.4 'Malgun Gothic',sans-serif;"
+    "border:1px solid #3a3f4b;box-shadow:0 6px 24px rgba(0,0,0,.5);z-index:99999;"
+    "opacity:0;transition:opacity .25s;pointer-events:none;white-space:pre-wrap}"
+    "#edopro-toast.on{opacity:1}"
+    "#edopro-drop{display:none!important;position:fixed;inset:0;z-index:99998;"
+    "background:rgba(0,0,0,.55);color:#fff;font:20px 'Malgun Gothic',sans-serif;"
+    "align-items:center;justify-content:center;text-align:center}"
+    "#edopro-drop.on{display:flex!important}"
     "</style>"
 )
 
-FIT = r"""
+BOOT = r"""
 <script>
 window.EDOPRO_WS_BASE = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
 if (typeof Module !== 'undefined') { Module.arguments = ['-i-want-to-be-admin']; }
 
-/* 화면 맞춤: 게임 캔버스(1024x640)를 창에 꽉 차게(비율 유지) 배치한다.
-   Emscripten 셸은 마우스 좌표를 canvas.width/rect.width 로 환산하므로 CSS 확대해도 입력이 맞는다. */
+window.addEventListener('error', function (e) {
+  try { console.log('[js-error] ' + (e.message || '') + ' @ ' + (e.filename || '') + ':' + (e.lineno || 0) + (e.error && e.error.stack ? ('\n' + e.error.stack) : '')); } catch (x) {}
+});
+window.addEventListener('unhandledrejection', function (e) {
+  try { console.log('[js-reject] ' + ((e.reason && e.reason.stack) || e.reason)); } catch (x) {}
+});
+
+/* ===== 화면 맞춤 ===== */
 (function () {
   var BASE_W = 1024, BASE_H = 640;
   function fit() {
@@ -42,50 +61,264 @@ if (typeof Module !== 'undefined') { Module.arguments = ['-i-want-to-be-admin'];
       c.style.height = h + 'px';
     }
   }
-  function visible(el) {
-    var cs = getComputedStyle(el);
-    return cs.display !== 'none' && cs.visibility !== 'hidden' && el.getBoundingClientRect().width > 0;
-  }
   window.__edoproFit = fit;
   window.addEventListener('resize', fit);
   document.addEventListener('DOMContentLoaded', fit);
   window.addEventListener('load', fit);
-  /* 게임이 캔버스 속성/크기를 바꾸거나 창이 늦게 커져도 계속 맞춘다 */
   var n = 0;
   var t = setInterval(function () { fit(); if (++n > 240) clearInterval(t); }, 250);
   try {
     new MutationObserver(fit).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class', 'width', 'height'] });
   } catch (e) {}
 })();
+
+/* ===== 덱/리플레이 보관(서버 /api/userdata) + 드래그&드롭 ===== */
+(function () {
+  var SAVE_MS = 20000;
+  var MAX_FILE = 4 * 1024 * 1024;
+  var lastSig = '';
+  var timer = null;
+  var booted = false;
+
+  function toast(msg, ms) {
+    var el = document.getElementById('edopro-toast');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'edopro-toast';
+      document.body.appendChild(el);
+    }
+    el.textContent = msg;
+    el.className = 'on';
+    clearTimeout(el._t);
+    el._t = setTimeout(function () { el.className = ''; }, ms || 2600);
+  }
+  window.__edoproToast = toast;
+
+  function b64(u8) {
+    var s = '';
+    for (var i = 0; i < u8.length; i += 0x8000) {
+      s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+    }
+    return btoa(s);
+  }
+  function unb64(str) {
+    var bin = atob(str);
+    var out = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+
+  function walk(dir, out) {
+    var names;
+    try { names = FS.readdir(dir); } catch (e) { return; }
+    for (var i = 0; i < names.length; i++) {
+      var n = names[i];
+      if (n === '.' || n === '..') continue;
+      var full = dir + '/' + n;
+      var st;
+      try { st = FS.stat(full); } catch (e) { continue; }
+      if (FS.isDir(st.mode)) walk(full, out);
+      else out.push({ path: full, size: st.size });
+    }
+  }
+
+  /* 프리로드된 덱 이름 중 일부는 UTF-8 이 깨져 PUA(U+E000~U+F8FF) 문자로 보인다.
+     그런 이름을 서버에 올리면 복원 때 EDOPro 덱 스캔이 ErrnoError 로 죽는다 -> 제외. */
+  function badName(p) {
+    return /[\uE000-\uF8FF]/.test(p) || /[\uD800-\uDFFF]/.test(p);
+  }
+
+  function collect() {
+    var list = [];
+    walk('/deck', list);
+    walk('/replay', list);
+    var files = {};
+    var sig = [];
+    for (var i = 0; i < list.length; i++) {
+      var it = list[i];
+      if (badName(it.path)) continue;
+      sig.push(it.path + ':' + it.size);
+      if (it.size > MAX_FILE) continue;
+      try {
+        files[it.path.substring(1)] = b64(FS.readFile(it.path));
+      } catch (e) {}
+    }
+    return { files: files, sig: sig.join('|') };
+  }
+
+  function post(files, beacon) {
+    var body = JSON.stringify({ files: files });
+    if (beacon && navigator.sendBeacon) {
+      try { navigator.sendBeacon('/api/userdata', new Blob([body], { type: 'application/json' })); return true; } catch (e) {}
+    }
+    var xhr = new XMLHttpRequest();
+    try {
+      xhr.open('POST', '/api/userdata', false);
+      xhr.setRequestHeader('Content-Type', 'application/json');
+      xhr.send(body);
+      return xhr.status === 200;
+    } catch (e) { return false; }
+  }
+
+  function sync(force, silent) {
+    if (!booted) return;
+    var c = collect();
+    if (!force && c.sig === lastSig) return;
+    var ok = post(c.files, false);
+    if (ok) lastSig = c.sig;
+    if (!silent) toast(ok ? '덱/리플레이를 서버에 저장했습니다' : '저장 실패 — 서버 연결을 확인하세요');
+  }
+  window.__edoproSync = sync;
+
+  function restore() {
+    if (location.search.indexOf('norestore') >= 0) { console.log('[userdata] restore skipped by flag'); return; }
+    try {
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', '/api/userdata', false);
+      xhr.overrideMimeType('text/plain; charset=x-user-defined');
+      xhr.send(null);
+      if (xhr.status !== 200) return;
+      var txt = xhr.responseText || '';
+      var json = JSON.parse(txt);
+      var files = json.files || {};
+      var n = 0;
+      for (var k in files) {
+        try {
+          var dst = '/' + k;
+          if (badName(k)) continue;
+          if (FS.analyzePath(dst).exists) continue;   /* 프리로드된 기본 덱은 덮어쓰지 않는다 */
+          FS.mkdirTree('/' + k.substring(0, k.lastIndexOf('/')));
+          FS.writeFile(dst, unb64(files[k]));
+          n++;
+        } catch (e) {}
+      }
+      if (n) console.log('[userdata] restored ' + n + ' files');
+    } catch (e) { console.log('[userdata] restore error: ' + (e && e.stack ? e.stack : e)); }
+  }
+
+  /* MEMFS: /replay 폴더 보장 (리플레이 열람용) */
+  function ensureDirs() {
+    ['/replay', '/puzzles'].forEach(function (d) {
+      try {
+        FS.mkdirTree(d);
+      } catch (e) {
+        console.log('[userdata] mkdir ' + d + ' fail: ' + e);
+        try { if (!FS.isDir(FS.stat(d).mode)) FS.unlink(d); FS.mkdirTree(d); } catch (e2) {}
+      }
+    });
+  }
+
+  /* 복원은 **부팅이 끝난 뒤**에 한다.
+     preRun 에서 MEMFS 에 쓰면 프리로드(.data) 해제와 충돌해 게임이 ErrnoError 로 죽는다. */
+  function waitBoot(cb) {
+    var n = 0;
+    var t = setInterval(function () {
+      var c = document.querySelector('canvas');
+      if ((c && c.width > 320) || ++n > 240) { clearInterval(t); cb(); }
+    }, 250);
+  }
+  waitBoot(function () {
+    setTimeout(function () {
+      try { ensureDirs(); } catch (e) { console.log('[userdata] ensureDirs fail: ' + e); }
+      try { restore(); } catch (e) { console.log('[userdata] restore fail: ' + e); }
+      startSaver();
+    }, 1200);
+  });
+
+  /* 부팅 완료 후 주기 저장 시작 */
+  function startSaver() {
+    if (booted) return;
+    booted = true;
+    setTimeout(function () { sync(true, true); }, 6000);
+    timer = setInterval(function () { sync(false, true); }, SAVE_MS);
+    window.addEventListener('beforeunload', function () { try { sync(true, true); } catch (e) {} });
+    window.addEventListener('blur', function () { try { sync(false, true); } catch (e) {} });
+  }
+  window.addEventListener('edopro-ready', startSaver);
+  var poll = setInterval(function () {
+    if (typeof Module !== 'undefined' && Module.calledRun) { clearInterval(poll); startSaver(); }
+  }, 500);
+
+  /* 드래그&드롭: .ydk → /deck, .yrpX/.yrp3d/.yrp → /replay */
+  function dropZone() {
+    var el = document.getElementById('edopro-drop');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'edopro-drop';
+      el.textContent = '덱(.ydk) · 리플레이(.yrpX) 파일을 여기에 놓으세요';
+      document.body.appendChild(el);
+    }
+    return el;
+  }
+  function isDeck(name) { return /\.ydk$/i.test(name); }
+  function isReplay(name) { return /\.(yrpx|yrp3d|yrp)$/i.test(name); }
+
+  var dragDepth = 0;
+  window.addEventListener('dragenter', function (e) {
+    e.preventDefault();
+    dragDepth++;
+    dropZone().className = 'on';
+  });
+  window.addEventListener('dragover', function (e) { e.preventDefault(); });
+  window.addEventListener('dragleave', function (e) {
+    e.preventDefault();
+    if (--dragDepth <= 0) { dragDepth = 0; dropZone().className = ''; }
+  });
+  window.addEventListener('drop', function (e) {
+    e.preventDefault();
+    dragDepth = 0;
+    dropZone().className = '';
+    var files = e.dataTransfer && e.dataTransfer.files;
+    if (!files || !files.length) return;
+    var saved = 0;
+    for (var i = 0; i < files.length; i++) {
+      var f = files[i];
+      var dir = isDeck(f.name) ? '/deck' : (isReplay(f.name) ? '/replay' : null);
+      if (!dir) continue;
+      var reader = new FileReader();
+      reader.onload = (function (name, target) {
+        return function (ev) {
+          try {
+            FS.mkdirTree(target);
+            FS.writeFile(target + '/' + name, new Uint8Array(ev.target.result));
+            saved++;
+            toast((target === '/deck' ? '덱 추가: ' : '리플레이 추가: ') + name + '\n게임 안에서 목록을 새로 열면 보입니다');
+            if (booted) sync(true, true);
+          } catch (err) { toast('파일을 넣지 못했습니다: ' + err); }
+        };
+      })(f.name, dir);
+      reader.readAsArrayBuffer(f);
+    }
+  });
+
+  /* 단축키: F2 즉시 저장 */
+  window.addEventListener('keydown', function (e) {
+    if (e.key === 'F2') { e.preventDefault(); sync(true, false); }
+  });
+})();
 </script>
 """
 
-# 1) 기존 스타일/헬퍼 제거 후 새로 주입 (멱등)
 if "body>.emscripten_border" not in s:
-    # 이전에 주입한 <style>...</style> 블록들이 있으면 교체
-    import re
     s = re.sub(r"<style>html,body\{margin:0.*?</style>", "", s, flags=re.S)
     s = s.replace("</head>", CSS + "</head>", 1)
 else:
-    import re
     s = re.sub(r"<style>html,body\{margin:0.*?</style>", CSS, s, count=1, flags=re.S)
 
-# 2) 기존 주입 스크립트(EDOPRO_WS_BASE 포함) 제거
 start = s.find("<script>\nwindow.EDOPRO_WS_BASE")
-if start == -1:
-    start = s.find("<script>window.EDOPRO_WS_BASE")
-if start == -1:
-    # 다른 형태
+if start < 0:
     start = s.find("<script>\r\nwindow.EDOPRO_WS_BASE")
+if start < 0:
+    start = s.find("<script>window.EDOPRO_WS_BASE")
 if start != -1:
     end = s.find("</script>", start)
     if end != -1:
         s = s[:start] + s[end + len("</script>"):]
 
 if "</body>" in s:
-    s = s.replace("</body>", FIT + "</body>", 1)
+    s = s.replace("</body>", BOOT + "</body>", 1)
 else:
-    s += FIT
+    s += BOOT
 
 io.open(p, "w", encoding="utf-8").write(s)
-print("postprocess: 레이아웃(중앙+맞춤) + WS + admin 주입 완료")
+print("postprocess: 레이아웃 + 사용자데이터(덱/리플레이) + WS + admin 주입 완료")
