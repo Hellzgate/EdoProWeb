@@ -61,6 +61,15 @@
 - POST: 같은 형식 본문 → `{"saved": N}`
 - 저장 위치 `USERDATA_DIR`(기본 `/app/userdata`, 볼륨 권장), 경로·길이 검증(최대 32MB)
 
+### `GET|POST|DELETE /api/userdata/file?path=<rel>` (v1.6.0)
+보관 파일 단건 처리.
+- GET: 파일 내용(다운로드, `Content-Disposition: attachment`)
+- POST: 본문(raw) 그대로 저장 (최대 8MB)
+- DELETE: 삭제
+
+### `GET /files.html` (v1.6.0)
+보관함 UI — 덱/리플레이/퍼즐/설정 목록, 다운로드 링크, 업로드, 삭제.
+
 ## 참고
 
 - 정적 응답에는 `Cross-Origin-Opener-Policy: same-origin`,

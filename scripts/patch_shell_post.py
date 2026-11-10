@@ -132,6 +132,8 @@ window.addEventListener('unhandledrejection', function (e) {
     var list = [];
     walk('/deck', list);
     walk('/replay', list);
+    walk('/puzzles', list);
+    try { if (FS.analyzePath('/config/system.conf').exists) list.push({ path: '/config/system.conf', size: FS.stat('/config/system.conf').size }); } catch (e) {}
     var files = {};
     var sig = [];
     for (var i = 0; i < list.length; i++) {
@@ -208,7 +210,58 @@ window.addEventListener('unhandledrejection', function (e) {
     });
   }
 
-  /* 복원은 **부팅이 끝난 뒤**에 한다.
+  /* 설정(system.conf)은 게임이 시작 전에 읽으므로, 프리로드가 끝난 직후(=preRun 안)에 복원한다.
+     단, 프리로드가 시작되기 전에 쓰면 .data 해제와 충돌해 죽으므로 'system.conf 가 보일 때까지' 기다린다. */
+  function restoreConfigOnly() {
+    if (location.search.indexOf('norestore') >= 0) return;
+    try {
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', '/api/userdata', false);
+      xhr.overrideMimeType('text/plain; charset=x-user-defined');
+      xhr.send(null);
+      if (xhr.status !== 200) return;
+      var files = (JSON.parse(xhr.responseText).files) || {};
+      var b64 = files['config/system.conf'];
+      if (!b64) return;
+      FS.writeFile('/config/system.conf', unb64(b64));
+      console.log('[userdata] system.conf restored');
+    } catch (e) { console.log('[userdata] cfg restore fail: ' + e); }
+  }
+
+  function hookConfigRestore() {
+    if (typeof Module === 'undefined') return false;
+    var add = Module.addRunDependency, rem = Module.removeRunDependency;
+    if (typeof add !== 'function') return false;   /* 아직 노출 전 — 재시도 */
+    Module.preRun = Module.preRun || [];
+    Module.preRun.unshift(function () {
+      add('edopro-config-restore');
+      var n = 0;
+      (function wait() {
+        var ready = false;
+        try { ready = FS.analyzePath('/config/system.conf').exists; } catch (e) {}
+        if (ready || ++n > 900) {
+          try { restoreConfigOnly(); } catch (e) { console.log('[userdata] cfg restore fail: ' + e); }
+          rem('edopro-config-restore');
+          return;
+        }
+        setTimeout(wait, 25);
+      })();
+    });
+    return true;
+  }
+  if (!hookConfigRestore()) {
+    var tries2 = 0;
+    var iv2 = setInterval(function () {
+      if (hookConfigRestore()) { clearInterval(iv2); return; }
+      if (++tries2 > 200) {
+        clearInterval(iv2);
+        console.log('[userdata] addRunDependency 미노출 — 설정은 부팅 후 복원(다음 실행부터 적용)');
+        setTimeout(restoreConfigOnly, 9000);
+      }
+    }, 30);
+  }
+
+  /* 덱/리플레이 복원은 **부팅이 끝난 뒤**에 한다.
      preRun 에서 MEMFS 에 쓰면 프리로드(.data) 해제와 충돌해 게임이 ErrnoError 로 죽는다. */
   function waitBoot(cb) {
     var n = 0;
@@ -252,6 +305,7 @@ window.addEventListener('unhandledrejection', function (e) {
   }
   function isDeck(name) { return /\.ydk$/i.test(name); }
   function isReplay(name) { return /\.(yrpx|yrp3d|yrp)$/i.test(name); }
+  function isPuzzle(name) { return /\.lua$/i.test(name); }
 
   var dragDepth = 0;
   window.addEventListener('dragenter', function (e) {
@@ -273,7 +327,7 @@ window.addEventListener('unhandledrejection', function (e) {
     var saved = 0;
     for (var i = 0; i < files.length; i++) {
       var f = files[i];
-      var dir = isDeck(f.name) ? '/deck' : (isReplay(f.name) ? '/replay' : null);
+      var dir = isDeck(f.name) ? '/deck' : (isReplay(f.name) ? '/replay' : (isPuzzle(f.name) ? '/puzzles' : null));
       if (!dir) continue;
       var reader = new FileReader();
       reader.onload = (function (name, target) {
@@ -282,7 +336,8 @@ window.addEventListener('unhandledrejection', function (e) {
             FS.mkdirTree(target);
             FS.writeFile(target + '/' + name, new Uint8Array(ev.target.result));
             saved++;
-            toast((target === '/deck' ? '덱 추가: ' : '리플레이 추가: ') + name + '\n게임 안에서 목록을 새로 열면 보입니다');
+            var label = target === '/deck' ? '덱 추가: ' : (target === '/replay' ? '리플레이 추가: ' : '퍼즐 추가: ');
+            toast(label + name + '\n게임 안에서 목록을 새로 열면 보입니다');
             if (booted) sync(true, true);
           } catch (err) { toast('파일을 넣지 못했습니다: ' + err); }
         };

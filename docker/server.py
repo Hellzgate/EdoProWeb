@@ -41,7 +41,8 @@ BRIDGE_FORCE = os.environ.get("BRIDGE_FORCE", "0") == "1"
 LOBBY_ALLOW_ANY = os.environ.get("LOBBY_ALLOW_ANY", "1") == "1"
 # 덱/리플레이 등 사용자 데이터 보관 폴더(볼륨 권장)
 USERDATA_DIR = os.environ.get("USERDATA_DIR", "/app/userdata")
-USERDATA_PREFIXES = ("deck/", "replay/")
+USERDATA_PREFIXES = ("deck/", "replay/", "puzzles/")
+USERDATA_FILES = ("config/system.conf",)
 USERDATA_MAX_BYTES = 32 * 1024 * 1024
 
 MIME = {
@@ -136,7 +137,7 @@ def _ud_path(rel):
     """USERDATA_DIR 안의 안전한 상대 경로만 허용."""
     if not rel or rel.startswith("/") or ".." in rel.split("/"):
         return None
-    if not rel.startswith(USERDATA_PREFIXES):
+    if not (rel.startswith(USERDATA_PREFIXES) or rel in USERDATA_FILES):
         return None
     # 파일시스템 이름 길이 제한(255B) — 일부 프리로드 덱 이름이 깨져 길어진다
     if len(rel.encode("utf-8", "surrogatepass")) > 200:
@@ -195,6 +196,112 @@ def save_userdata(payload):
     log(f"userdata saved {saved} files ({total}B)")
     return saved
 
+
+
+
+def _ud_read_file(rel):
+    path = _ud_path(rel)
+    if not path or not os.path.isfile(path):
+        return None
+    try:
+        with open(path, "rb") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def _ud_write_file(rel, data):
+    path = _ud_path(rel)
+    if not path or not isinstance(data, (bytes, bytearray)):
+        return False
+    if len(data) > 8 * 1024 * 1024:
+        return False
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "wb") as f:
+            f.write(data)
+        os.replace(tmp, path)
+        return True
+    except OSError as e:
+        log("userdata file write fail", rel, e)
+        return False
+
+
+def _file_kind(rel):
+    if rel.startswith("deck/"):
+        return "덱"
+    if rel.startswith("replay/"):
+        return "리플레이"
+    if rel.startswith("puzzles/"):
+        return "퍼즐"
+    if rel in USERDATA_FILES:
+        return "설정"
+    return "기타"
+
+
+def render_files_page():
+    files = sorted(load_userdata().keys())
+    rows = []
+    for rel in files:
+        import html as _html
+        name = _html.escape(rel.split("/")[-1])
+        link = "/api/userdata/file?path=" + urllib.parse.quote(rel)
+        rows.append(
+            "<tr><td>" + _file_kind(rel) + "</td>"
+            "<td><a href=\"" + link + "\" download>" + name + "</a></td>"
+            "<td class=\"k\">" + _html.escape(rel) + "</td>"
+            "<td><a class=\"del\" href=\"#\" data-path=\"" + _html.escape(rel) + "\">삭제</a></td></tr>")
+    body = "".join(rows) or "<tr><td colspan=4 class=\"empty\">보관된 파일이 없습니다</td></tr>"
+    return """<!doctype html><meta charset="utf-8"><title>덱 / 리플레이 보관함</title>
+<style>
+body{font:14px 'Malgun Gothic',sans-serif;background:#16181d;color:#e6e8ee;margin:0;padding:24px}
+h1{font-size:18px;margin:0 0 6px}p{color:#9aa1ad;margin:0 0 16px}
+table{border-collapse:collapse;width:100%;max-width:1100px}
+th,td{padding:7px 10px;border-bottom:1px solid #2b2f38;text-align:left}
+th{background:#1e222a;color:#aeb6c2;font-weight:600;font-size:12px}
+a{color:#7fb4ff;text-decoration:none}a:hover{text-decoration:underline}
+.k{color:#7c8593;font-size:12px}.empty{color:#7c8593;text-align:center;padding:24px}
+.del{color:#ff8b8b}
+.box{margin:22px 0;max-width:1100px;background:#1b1f26;border:1px solid #2b2f38;border-radius:8px;padding:14px}
+input[type=file]{color:#cfd5df}
+button{background:#2b6cb0;color:#fff;border:0;border-radius:6px;padding:7px 14px;font:13px 'Malgun Gothic';cursor:pointer}
+button:hover{background:#3479c2}
+code{background:#11141a;padding:2px 6px;border-radius:4px;color:#9fd0ff}
+</style>
+<h1>덱 / 리플레이 / 퍼즐 보관함</h1>
+<p>게임에서 만든 파일이 여기 저장됩니다. 링크를 누르면 내려받고, 아래에서 올릴 수도 있습니다.
+게임 화면에 <b>끌어다 놓아도</b> 바로 추가됩니다.</p>
+<table><thead><tr><th>종류</th><th>이름</th><th>경로</th><th></th></tr></thead><tbody>""" + body + """</tbody></table>
+<div class="box">
+  <b>파일 올리기</b> — <code>.ydk</code> → deck, <code>.yrpX</code> → replay, <code>.lua</code> → puzzles<br><br>
+  <input type="file" id="f" multiple>
+  <button id="up">올리기</button> <span id="st"></span>
+</div>
+<script>
+function kind(n){ if(/[.]ydk$/i.test(n)) return 'deck/'; if(/[.](yrpx|yrp3d|yrp)$/i.test(n)) return 'replay/'; if(/[.]lua$/i.test(n)) return 'puzzles/'; return null; }
+document.getElementById('up').onclick = async function(){
+  var files = document.getElementById('f').files, st = document.getElementById('st');
+  if(!files.length){ st.textContent = '파일을 선택하세요'; return; }
+  var ok = 0;
+  for (var i=0;i<files.length;i++){
+    var f = files[i], dir = kind(f.name);
+    if(!dir){ st.textContent = f.name + ' 은(는) 지원하지 않는 형식'; continue; }
+    var r = await fetch('/api/userdata/file?path=' + encodeURIComponent(dir + f.name), { method:'POST', body: f });
+    if(r.ok) ok++;
+  }
+  st.textContent = ok + '개 올렸습니다';
+  setTimeout(function(){ location.reload(); }, 600);
+};
+document.querySelectorAll('a.del').forEach(function(a){
+  a.onclick = async function(ev){
+    ev.preventDefault();
+    if(!confirm('삭제할까요?\n' + a.dataset.path)) return;
+    await fetch('/api/userdata/file?path=' + encodeURIComponent(a.dataset.path), { method:'DELETE' });
+    location.reload();
+  };
+});
+</script>"""
 
 def ws_frame(payload, opcode=0x2):
     n = len(payload)
@@ -526,6 +633,52 @@ async def handle(reader, writer):
             else:
                 body = json.dumps({"files": load_userdata()}, ensure_ascii=False).encode()
             writer.write(resp(200, "OK", body, "application/json; charset=utf-8", "Cache-Control: no-store\r\n"))
+            await writer.drain()
+            writer.close()
+            return
+
+
+        # ---- 덱/리플레이 보관함 페이지 ----
+        if path in ("/files.html", "/decks.html"):
+            body = render_files_page().encode()
+            writer.write(resp(200, "OK", body, "text/html; charset=utf-8"))
+            await writer.drain()
+            writer.close()
+            return
+
+        # ---- 파일 단건 (다운로드 / 업로드 / 삭제) ----
+        if path == "/api/userdata/file":
+            qs = urllib.parse.parse_qs(parsed.query)
+            rel = (qs.get("path") or [""])[0]
+            if method == "POST":
+                length = int(headers.get("content-length", "0") or 0)
+                raw = rest or b""
+                while len(raw) < length:
+                    chunk = await reader.read(length - len(raw))
+                    if not chunk:
+                        break
+                    raw += chunk
+                ok = _ud_write_file(rel, raw)
+                writer.write(resp(200 if ok else 400, "OK" if ok else "Bad Request",
+                                  json.dumps({"ok": ok}).encode(), "application/json"))
+            elif method == "DELETE":
+                pth = _ud_path(rel)
+                try:
+                    if pth and os.path.isfile(pth):
+                        os.remove(pth)
+                    ok = True
+                except OSError:
+                    ok = False
+                writer.write(resp(200 if ok else 400, "OK" if ok else "Bad Request",
+                                  json.dumps({"ok": ok}).encode(), "application/json"))
+            else:
+                data = _ud_read_file(rel)
+                if data is None:
+                    writer.write(resp(404, "Not Found", b"404"))
+                else:
+                    name = rel.split("/")[-1]
+                    writer.write(resp(200, "OK", data, "application/octet-stream",
+                                      "Content-Disposition: attachment; filename*=UTF-8''" + urllib.parse.quote(name) + "\r\n"))
             await writer.drain()
             writer.close()
             return

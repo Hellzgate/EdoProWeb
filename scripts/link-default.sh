@@ -13,7 +13,7 @@ em++ -O1 -w -std=c++17 -fno-rtti -fexceptions \
   -o "$W/web/edopro-full.html" \
   -sUSE_SDL=2 -sUSE_FREETYPE=1 -sUSE_LIBPNG=1 -sUSE_LIBJPEG=1 -sUSE_BZIP2=1 -sUSE_ZLIB=1 -sUSE_SQLITE3 \
   -sASYNCIFY -sASYNCIFY_STACK_SIZE=1048576 \
-  -sEXPORTED_RUNTIME_METHODS='["FS","ccall","cwrap"]' \
+  -sEXPORTED_RUNTIME_METHODS=["FS","ccall","cwrap","addRunDependency","removeRunDependency"]\
   -sALLOW_MEMORY_GROWTH=1 -sEXIT_RUNTIME=0 -sINITIAL_MEMORY=134217728 -sSTACK_SIZE=5242880 \
   -sDISABLE_EXCEPTION_CATCHING=0 -lwebsocket.js -sFETCH \
   --preload-file "$A/config@/config" \
