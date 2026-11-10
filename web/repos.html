@@ -1,0 +1,92 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>저장소 관리 — EDOPro Web</title>
+<style>
+body{font:14px 'Malgun Gothic',sans-serif;background:#16181d;color:#e6e8ee;margin:0;padding:24px}
+h1{font-size:18px;margin:0 0 4px}
+p.sub{color:#9aa1ad;margin:0 0 18px}
+table{border-collapse:collapse;width:100%;max-width:1080px}
+th,td{padding:8px 10px;border-bottom:1px solid #2b2f38;text-align:left}
+th{background:#1e222a;color:#aeb6c2;font-size:12px;font-weight:600}
+code{background:#11141a;padding:2px 6px;border-radius:4px;color:#9fd0ff}
+.box{max-width:1080px;background:#1b1f26;border:1px solid #2b2f38;border-radius:8px;padding:14px;margin:18px 0}
+.box h2{font-size:14px;margin:0 0 10px;color:#cfd6e2}
+input[type=text]{background:#12151a;border:1px solid #333a45;color:#e6e8ee;border-radius:6px;padding:7px 10px;font:13px 'Malgun Gothic';width:260px}
+button{background:#2b6cb0;color:#fff;border:0;border-radius:6px;padding:7px 14px;font:13px 'Malgun Gothic';cursor:pointer;margin-left:6px}
+button:hover{background:#3479c2}
+button.ghost{background:#2a2f3a}
+button.ghost:hover{background:#353b48}
+#log{white-space:pre-wrap;color:#9aa1ad;font:12px Consolas,monospace;margin-top:10px;max-height:180px;overflow:auto}
+.badge{display:inline-block;background:#1f2a1f;color:#8fd08f;border:1px solid #2f4a2f;border-radius:999px;padding:1px 9px;font-size:12px}
+.warn{color:#ffcf7a}
+.ok{color:#8fd08f}
+</style>
+<h1>저장소 관리 (자동 업데이트)</h1>
+<p class="sub">EDOPro 와 같은 방식으로 카드 DB·스크립트·금제를 GitHub 에서 받아 게임에 적용합니다.
+서버가 주기적으로 갱신하고, <b>게임 화면을 새로고침하면 최신 데이터가 적용</b>됩니다.</p>
+
+<div class="box">
+  <h2>적용 상태</h2>
+  <div id="bundle">불러오는 중…</div>
+  <div class="sub" style="margin:10px 0 0">게임에 적용하려면 <a href="/" style="color:#7fb4ff">게임 화면</a>을 새로고침하세요.</div>
+</div>
+
+<div class="box">
+  <h2>저장소</h2>
+  <table><thead><tr><th>이름</th><th>최신 커밋</th><th>파일</th><th>원격</th></tr></thead><tbody id="rows"></tbody></table>
+  <div style="margin-top:12px">
+    <input type="text" id="newspec" placeholder="owner/repo  (예: ProjectIgnis/LFLists)">
+    <button id="add">추가</button>
+    <button class="ghost" id="syncAll">전체 갱신</button>
+  </div>
+  <div id="log"></div>
+</div>
+
+<div class="box">
+  <h2>동작 방식</h2>
+  <table>
+    <tr><th style="width:160px">서버</th><td>기동 시 + <span id="autoHours">6</span>시간마다 <code>git fetch + reset</code> 로 저장소를 갱신합니다.</td></tr>
+    <tr><th>게임</th><td>화면을 열 때 <code>/api/repos/bundle</code> 을 받아 <code>expansions/</code>·<code>script/</code>·<code>lflists/</code> 에 넣고 시작합니다. (변경 없으면 304 → 즉시)</td></tr>
+    <tr><th>지원 파일</th><td><code>*.cdb</code> → 카드 DB · <code>*.lua</code> → 스크립트 · <code>*.conf</code> → 금제</td></tr>
+  </table>
+</div>
+
+<script>
+function log(msg){ var el = document.getElementById('log'); el.textContent = msg + (el.textContent ? '\n' + el.textContent : ''); }
+function mb(b){ return (b / 1048576).toFixed(1) + 'MB'; }
+
+async function load(){
+  const r = await fetch('/api/repos');
+  const j = await r.json();
+  const tbody = document.getElementById('rows');
+  tbody.innerHTML = (j.repos || []).map(x =>
+    `<tr><td><b>${x.name}</b></td><td><code>${x.head || '-'}</code></td><td>${x.files}</td><td style="color:#7c8593;font-size:12px">${x.remote || ''}</td></tr>`
+  ).join('') || '<tr><td colspan=4 style="color:#7c8593">저장소가 없습니다</td></tr>';
+  const b = j.bundle || {};
+  document.getElementById('bundle').innerHTML =
+    `<span class="badge">적용 준비됨</span> 파일 <b>${b.count || 0}</b>개 · <b>${mb(b.bytes || 0)}</b> ` +
+    `· <code>${(b.etag || '').replace(/"/g, '').slice(0, 10)}</code>`;
+  document.getElementById('autoHours').textContent = j.autoHours || '6';
+}
+
+document.getElementById('add').onclick = async () => {
+  const spec = document.getElementById('newspec').value.trim();
+  if(!spec) return;
+  log('추가/갱신: ' + spec);
+  const r = await fetch('/api/repos/sync', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ repos:[spec] }) });
+  const j = await r.json();
+  (j.results || []).forEach(x => log((x.ok ? 'OK  ' : 'FAIL ') + x.name + (x.head ? '  ' + x.head : '') + (x.error ? '  ' + x.error : '')));
+  document.getElementById('newspec').value = '';
+  load();
+};
+
+document.getElementById('syncAll').onclick = async () => {
+  log('전체 갱신…');
+  const r = await fetch('/api/repos/sync', { method:'POST', headers:{'Content-Type':'application/json'}, body: '{}' });
+  const j = await r.json();
+  (j.results || []).forEach(x => log((x.ok ? 'OK  ' : 'FAIL ') + x.name + (x.head ? '  ' + x.head : '') + (x.error ? '  ' + x.error : '')));
+  load();
+};
+
+load();
+</script>

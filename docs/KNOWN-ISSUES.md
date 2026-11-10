@@ -199,7 +199,31 @@ EDOPro 는 `./puzzles`(퍼즐 목록)와 `replay/*.yrpX`(리플레이) 를 스�
 **주의**: `Module.addRunDependency` 는 `-sEXPORTED_RUNTIME_METHODS` 에 넣어야 노출된다.
 노출되지 않는 빌드에서는 설정 복원을 **부팅 후**로 미루고(다음 실행부터 적용) 로그로 알린다.
 
-## 10. 그 밖의 제약
+## 10. 저장소 / 자동 업데이트 (v1.7.0)
+
+EDOPro 는 `configs.json` 의 `repos` 를 **libgit2** 로 clone/pull 해 카드 DB·스크립트·금제를 자동 갱신한다.
+웹 빌드는 libgit2 를 쓸 수 없어 **서버가 git 을 대행**하고, 게임은 결과만 받아 쓴다.
+
+```
+[서버] 기동 시 + REPOS_AUTO_HOURS(기본 6h) 마다  git fetch + reset  →  /app/repos/<owner>_<repo>
+       /api/repos/bundle  :  *.cdb → expansions/<repo>__<파일>
+                             *.lua → script/<repo>/<파일>     (게임은 script/ 1단계만 스캔 → 평탄화)
+                             *.conf→ lflists/<repo>__<파일>   (ETag, 변경 없으면 304)
+[게임] preRun(프리로드 완료 후) 에 번들 적용  →  DataHandler 가 그대로 읽는다(코드 수정 불필요)
+```
+
+**왜 이 경로인가**
+- 게임의 로더가 이미 `./expansions/**/*.cdb`(2단계), `./script`(+1단계), `./lflists/*.conf` 를 스캔한다
+  → C++ 수정 없이 저장소 내용을 그 자리에 넣기만 하면 된다.
+- `repo_manager.cpp` 는 wasm 에서 스텁이라 `Game::ParseGithubRepositories` 가 빈 목록을 받는다(그래서 예전엔 저장소가 무효).
+
+**주의**
+- 적용 시점은 **페이지 로드(부팅) 1회** — EDOPro 처럼 "다음 실행에 적용"과 동일.
+- 기존 프리로드 카드 DB(한국어 `cards.cdb`) 뒤에 저장소 cdb 가 로드되므로,
+  **같은 ID 는 기존(한국어) 데이터가 유지**되고 **새 카드만 추가**된다(의도).
+- 대용량 스크립트 저장소(DeltaBagooska 등)는 번들이 커지므로 `/repos.html` 에서 필요할 때만 추가.
+
+## 11. 그 밖의 제약
 
 - **로컬 호스팅**: 브라우저는 TCP 서버를 열 수 없으므로 "방 만들기"는 실제로는 **멀티롤 서버에 접속**한다.
   봇은 NAS 패널(`POST /api/bot/start`)로 투입한다.

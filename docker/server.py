@@ -303,6 +303,109 @@ document.querySelectorAll('a.del').forEach(function(a){
 });
 </script>"""
 
+
+
+# ---------------- 저장소(repository) → 게임 데이터 매핑 ----------------
+_bundle_cache = {"key": None, "json": None, "etag": None}
+
+
+def _repo_state_key():
+    parts = []
+    if os.path.isdir(REPO_ROOT):
+        for name in sorted(os.listdir(REPO_ROOT)):
+            full = os.path.join(REPO_ROOT, name)
+            if not os.path.isdir(full):
+                continue
+            try:
+                st = os.stat(full)
+                parts.append(f"{name}:{int(st.st_mtime)}")
+            except OSError:
+                pass
+    return "|".join(parts)
+
+
+def build_repo_bundle():
+    """저장소 파일을 게임이 읽는 경로로 매핑해 {대상경로: base64} 로 만든다.
+
+    - *.cdb                -> expansions/<repo>__<이름>.cdb
+    - *.lua (script 등)    -> script/<repo>/<파일명>.lua   (한 단계 폴더만 스캔되므로 평탄화)
+    - *.conf (lflist)      -> lflists/<repo>__<이름>.conf
+    """
+    key = _repo_state_key()
+    if _bundle_cache["key"] == key and _bundle_cache["json"] is not None:
+        return _bundle_cache["json"], _bundle_cache["etag"]
+
+    files = {}
+    total = 0
+    if os.path.isdir(REPO_ROOT):
+        for repo in sorted(os.listdir(REPO_ROOT)):
+            repo_dir = os.path.join(REPO_ROOT, repo)
+            if not os.path.isdir(repo_dir) or repo.startswith("."):
+                continue
+            safe_repo = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in repo)
+            for root, dirs, names in os.walk(repo_dir):
+                dirs[:] = [d for d in dirs if d != ".git"]
+                for name in names:
+                    low = name.lower()
+                    full = os.path.join(root, name)
+                    rel = os.path.relpath(full, repo_dir).replace(os.sep, "/")
+                    if rel.startswith(".git/") or "/.git/" in rel:
+                        continue
+                    if low.endswith(".cdb"):
+                        dest = f"expansions/{safe_repo}__{name}"
+                    elif low.endswith(".lua"):
+                        dest = f"script/{safe_repo}/{name}"
+                    elif low.endswith(".conf"):
+                        dest = f"lflists/{safe_repo}__{name}"
+                    else:
+                        continue
+                    try:
+                        if os.path.getsize(full) > 32 * 1024 * 1024:
+                            continue
+                        with open(full, "rb") as f:
+                            data = f.read()
+                    except OSError:
+                        continue
+                    files[dest] = base64.b64encode(data).decode()
+                    total += len(data)
+
+    body = json.dumps({"files": files, "count": len(files), "bytes": total}, ensure_ascii=False).encode()
+    etag = '"' + hashlib.sha1(body).hexdigest() + '"'
+    _bundle_cache.update(key=key, json=body, etag=etag)
+    log(f"repo bundle {len(files)} files ({total/1048576:.1f}MB)")
+    return body, etag
+
+
+def repo_bundle_summary():
+    body, etag = build_repo_bundle()
+    try:
+        j = json.loads(body)
+    except Exception:
+        j = {"count": 0, "bytes": 0}
+    return {"etag": etag, "count": j.get("count", 0), "bytes": j.get("bytes", 0)}
+
+
+async def auto_sync_repos():
+    """REPOS_AUTO_HOURS 마다 저장소를 자동 갱신한다(유저 입장의 '자동 업데이트')."""
+    try:
+        hours = float(os.environ.get("REPOS_AUTO_HOURS", "6"))
+    except ValueError:
+        hours = 6.0
+    if hours <= 0:
+        log("repo auto-update disabled")
+        return
+    loop = asyncio.get_event_loop()
+    while True:
+        await asyncio.sleep(hours * 3600)
+        try:
+            log("repo auto-update start")
+            for spec in DEFAULT_REPOS:
+                await loop.run_in_executor(None, sync_repo, spec)
+            _bundle_cache["key"] = None
+            log("repo auto-update done")
+        except Exception as e:
+            log("repo auto-update failed:", e)
+
 def ws_frame(payload, opcode=0x2):
     n = len(payload)
     if n < 126:
@@ -546,7 +649,9 @@ async def handle(reader, writer):
 
         # ---- API ----
         if path == "/api/repos":
-            body = json.dumps({"repos": list_repos(), "defaults": DEFAULT_REPOS}, ensure_ascii=False).encode()
+            body = json.dumps({"repos": list_repos(), "defaults": DEFAULT_REPOS,
+                               "bundle": repo_bundle_summary(),
+                               "autoHours": os.environ.get("REPOS_AUTO_HOURS", "6")}, ensure_ascii=False).encode()
             writer.write(resp(200, "OK", body, "application/json; charset=utf-8"))
             await writer.drain()
             writer.close()
@@ -683,6 +788,22 @@ async def handle(reader, writer):
             writer.close()
             return
 
+
+        # ---- 저장소 번들(자동 업데이트 반영) ----
+        if path == "/api/repos/bundle":
+            body, etag = await asyncio.get_event_loop().run_in_executor(None, build_repo_bundle)
+            inm = headers.get("if-none-match")
+            if inm and inm.strip() == etag:
+                writer.write(resp(304, "Not Modified", b"", "application/json", f"ETag: {etag}\r\nCache-Control: no-cache\r\n"))
+                await writer.drain()
+                writer.close()
+                return
+            writer.write(resp(200, "OK", body, "application/json; charset=utf-8",
+                              f"ETag: {etag}\r\nCache-Control: no-cache\r\n"))
+            await writer.drain()
+            writer.close()
+            return
+
         # ---- static ----
         if method not in ("GET", "HEAD"):
             writer.write(resp(405, "Method Not Allowed"))
@@ -731,6 +852,7 @@ async def main():
     log(f"serving {ROOT} on :{PORT}  BRIDGE_TARGET={BRIDGE_TARGET or '(passthrough)'}  REPOS={DEFAULT_REPOS}")
     if DEFAULT_REPOS:
         asyncio.get_event_loop().run_in_executor(None, lambda: [sync_repo(s) for s in DEFAULT_REPOS])
+    asyncio.ensure_future(auto_sync_repos())
     server = await asyncio.start_server(handle, "0.0.0.0", PORT, backlog=128)
     async with server:
         await server.serve_forever()

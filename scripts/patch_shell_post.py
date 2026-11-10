@@ -210,6 +210,32 @@ window.addEventListener('unhandledrejection', function (e) {
     });
   }
 
+  /* 저장소(자동 업데이트) 번들 → MEMFS. 게임이 시작 전에 CDB/스크립트를 읽으므로 preRun 에서 적용한다. */
+  function applyRepoBundle() {
+    try {
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', '/api/repos/bundle', false);
+      xhr.send(null);
+      if (xhr.status !== 200) { console.log('[repo] bundle status ' + xhr.status); return; }
+      var j = JSON.parse(xhr.responseText);
+      var files = j.files || {};
+      var n = 0, bytes = 0;
+      for (var k in files) {
+        try {
+          var bin = atob(files[k]);
+          var arr = new Uint8Array(bin.length);
+          for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+          var dst = '/' + k;
+          FS.mkdirTree(dst.substring(0, dst.lastIndexOf('/')));
+          FS.writeFile(dst, arr);
+          n++; bytes += arr.length;
+        } catch (e) { console.log('[repo] write fail ' + k + ': ' + e); }
+      }
+      window.__repoStats = { files: n, mb: (bytes / 1048576).toFixed(1) };
+      console.log('[repo] applied ' + n + ' files (' + (bytes / 1048576).toFixed(1) + 'MB)');
+    } catch (e) { console.log('[repo] bundle fail: ' + e); }
+  }
+
   /* 설정(system.conf)은 게임이 시작 전에 읽으므로, 프리로드가 끝난 직후(=preRun 안)에 복원한다.
      단, 프리로드가 시작되기 전에 쓰면 .data 해제와 충돌해 죽으므로 'system.conf 가 보일 때까지' 기다린다. */
   function restoreConfigOnly() {
@@ -237,9 +263,11 @@ window.addEventListener('unhandledrejection', function (e) {
       add('edopro-config-restore');
       var n = 0;
       (function wait() {
+        /* 프리로드(.data) 마지막 항목은 /media 이므로 그것이 풀렸는지로 완료를 판단한다 */
         var ready = false;
-        try { ready = FS.analyzePath('/config/system.conf').exists; } catch (e) {}
-        if (ready || ++n > 900) {
+        try { ready = FS.analyzePath('/config/system.conf').exists && FS.analyzePath('/media/Shaders').exists; } catch (e) {}
+        if (ready || ++n > 1200) {
+          try { applyRepoBundle(); } catch (e) { console.log('[repo] fail: ' + e); }
           try { restoreConfigOnly(); } catch (e) { console.log('[userdata] cfg restore fail: ' + e); }
           rem('edopro-config-restore');
           return;

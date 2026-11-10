@@ -70,6 +70,10 @@
 ### `GET /files.html` (v1.6.0)
 보관함 UI — 덱/리플레이/퍼즐/설정 목록, 다운로드 링크, 업로드, 삭제.
 
+### `GET /api/repos/bundle` (v1.7.0)
+저장소 파일을 게임 경로로 매핑한 번들: `{"files": {"expansions/<repo>__x.cdb": "<base64>", ...}, "count": N, "bytes": B}`
+`ETag` 를 주며 `If-None-Match` 가 맞으면 `304`. 게임은 부팅 시 이 번들을 MEMFS 에 넣는다.
+
 ## 참고
 
 - 정적 응답에는 `Cross-Origin-Opener-Policy: same-origin`,

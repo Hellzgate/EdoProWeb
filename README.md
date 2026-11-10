@@ -14,8 +14,8 @@
 
 | 항목 | 값 |
 |---|---|
-| 버전 | **1.6.0** (`VERSION`) |
-| 이미지 | `edopro-web:1.6.0` (약 285MB, `python:3.12-alpine` + `git`) |
+| 버전 | **1.7.0** (`VERSION`) |
+| 이미지 | `edopro-web:1.7.0` (약 285MB, `python:3.12-alpine` + `git`) |
 | 포트 | **7556** → 컨테이너 8080 |
 | 게임 URL | <http://192.168.0.53:7556> |
 | 저장소 관리 | <http://192.168.0.53:7556/repos.html> |
@@ -97,6 +97,7 @@ edopro-web/
 | **서버 대전(온라인) — 여러 서버(6) 각각 접속** | ✅ v1.4.0 |
 | **덱·리플레이·설정·퍼즐 영구 저장 / 드래그&드롭** | ✅ v1.6.0 |
 | **보관함 페이지 `/files.html` (다운로드·업로드·삭제)** | ✅ v1.6.0 |
+| **저장소 자동 업데이트 (카드 DB·스크립트·금제)** | ✅ v1.7.0 |
 | **필드 마법 일러 표시 / 퍼즐·리플레이 폴더** | ✅ v1.5.0 |
 
 자세한 원인과 다음 단계는 [docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md).
@@ -104,6 +105,17 @@ edopro-web/
 ---
 
 ## 5. 변경 이력
+
+### v1.7.0 (2026-11-10)
+
+- **저장소(Repository) 실제 적용 + 자동 업데이트** — EDOPro 의 최대 장점을 웹에서 재현
+  - 서버: 기동 시 + `REPOS_AUTO_HOURS`(기본 6시간) 마다 `git fetch + reset` 로 갱신
+  - 게임: 부팅 시 `/api/repos/bundle` 을 받아 **`expansions/`·`script/`·`lflists/`** 에 배치 후 시작
+    (변경 없으면 `304 Not Modified` → 즉시)
+  - 매핑: `*.cdb` → `expansions/<repo>__<파일>`, `*.lua` → `script/<repo>/<파일>`(평탄화), `*.conf` → `lflists/<repo>__<파일>`
+  - 기본 저장소: `ProjectIgnis/BabelCDB` + `ProjectIgnis/LFLists`(둘 다 12.2MB)
+  - `/repos.html` 새 UI: 적용 상태(파일 수·용량·해시), 저장소 목록(최신 커밋), 추가/전체 갱신, 자동 갱신 주기 안내
+- 실측: 번들 **24파일 / 12.2MB** 적용, `/lflists` 에 GOAT·Speed·Rush·World·Traditional 등, 게임 부팅 정상
 
 ### v1.6.0 (2026-11-10)
 
