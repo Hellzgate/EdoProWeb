@@ -1,14 +1,57 @@
 {
 	"repos": [],
-	"urls": [],
+	"urls": [
+		"https://github.com/ProjectIgnis/BabelCDB",
+		"https://github.com/ProjectIgnis/LFLists"
+	],
 	"servers": [
 		{
-			"name": "NAS Multirole",
-			"address": "127.0.0.1",
-			"roomaddress": "127.0.0.1",
-			"roomlistport": 7556,
+			"name": "Hellzmain",
+			"address": "sw20103.synology.me",
+			"duelport": 7914,
+			"roomaddress": "sw20103.synology.me",
+			"roomlistprotocol": "http",
+			"roomlistport": 7922
+		},
+		{
+			"name": "중부 유럽 (캐주얼)",
+			"address": "eu.projectignis.org",
+			"duelport": 7912,
+			"roomaddress": "eu.projectignis.org",
+			"roomlistprotocol": "http",
+			"roomlistport": 7923
+		},
+		{
+			"name": "중부 유럽 (경쟁전)",
+			"address": "eu.projectignis.org",
 			"duelport": 7911,
-			"roomlistprotocol": "http"
+			"roomaddress": "eu.projectignis.org",
+			"roomlistprotocol": "http",
+			"roomlistport": 7922
+		},
+		{
+			"name": "미국 서부 (캐주얼)",
+			"address": "us.projectignis.org",
+			"duelport": 7911,
+			"roomaddress": "us.projectignis.org",
+			"roomlistprotocol": "http",
+			"roomlistport": 7922
+		},
+		{
+			"name": "미국 서부 (경쟁전)",
+			"address": "us.projectignis.org",
+			"duelport": 7912,
+			"roomaddress": "us.projectignis.org",
+			"roomlistprotocol": "http",
+			"roomlistport": 7923
+		},
+		{
+			"name": "중국 남부 (캐주얼/경쟁전)",
+			"address": "ignis-duel.ygopro.cn",
+			"duelport": 44444,
+			"roomaddress": "ignis-room.ygopro.cn",
+			"roomlistprotocol": "https",
+			"roomlistport": 443
 		}
 	]
 }

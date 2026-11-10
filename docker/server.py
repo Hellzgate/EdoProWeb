@@ -21,6 +21,7 @@ import io
 import json
 import os
 import posixpath
+import re
 import subprocess
 import tarfile
 import urllib.parse
@@ -33,6 +34,11 @@ BRIDGE_TARGET = os.environ.get("BRIDGE_TARGET", "").strip()
 REPO_ROOT = os.environ.get("REPO_ROOT", "/app/repos")
 DEFAULT_REPOS = [r.strip() for r in os.environ.get("REPOS", "ProjectIgnis/BabelCDB").split(",") if r.strip()]
 LOBBY_UPSTREAM = os.environ.get("LOBBY_UPSTREAM", "http://192.168.0.4:7922").rstrip("/")
+# 1 이면 클라이언트가 요청한 host:port 로 접속한다(여러 서버 지원).
+# BRIDGE_FORCE=1 이면 BRIDGE_TARGET 으로 고정(기존 동작).
+BRIDGE_ALLOW_ANY = os.environ.get("BRIDGE_ALLOW_ANY", "1") == "1"
+BRIDGE_FORCE = os.environ.get("BRIDGE_FORCE", "0") == "1"
+LOBBY_ALLOW_ANY = os.environ.get("LOBBY_ALLOW_ANY", "1") == "1"
 
 MIME = {
     ".html": "text/html; charset=utf-8", ".js": "application/javascript",
@@ -87,26 +93,38 @@ def fetch_image(rel):
     return None
 
 
+def _valid_host(host):
+    """간단한 호스트 검증(SSRF/오타 방지): 영숫자 . - : 만 허용"""
+    if not host or len(host) > 253:
+        return False
+    return re.match(r"^[A-Za-z0-9._:\-]+$", host) is not None
+
+
 def log(*a):
     print("[web]", *a, flush=True)
 
 
-def fetch_lobby_rooms():
+def fetch_lobby_rooms(host=None, port=None, proto="http"):
     """멀티롤(또는 호환 서버)의 방 목록 JSON 을 그대로 가져온다.
 
     EDOPro 는 `<roomlistprotocol>://<roomaddress>:<roomlistport>/api/getrooms` 를 호출하고
     응답 `{"rooms":[...]}` 를 그대로 파싱한다.
+    브라우저는 CORS 로 이것을 직접 못 부르므로 이 프록시가 대신 가져온다.
     """
     import urllib.request
-    url = LOBBY_UPSTREAM + "/api/getrooms"
+    if host:
+        url = f"{proto}://{host}:{port}/api/getrooms"
+    else:
+        url = LOBBY_UPSTREAM + "/api/getrooms"
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "edopro-web"})
-        with urllib.request.urlopen(req, timeout=10) as r:
+        with urllib.request.urlopen(req, timeout=12) as r:
             data = r.read()
         if data:
+            log(f"lobby {url} -> {len(data)}B")
             return data
     except Exception as e:
-        log("lobby fetch failed:", e)
+        log("lobby fetch failed:", url, e)
     return None
 def ws_frame(payload, opcode=0x2):
     n = len(payload)
@@ -144,11 +162,15 @@ async def ws_bridge(reader, writer, target_host, target_port):
         await writer.drain()
         return
     log(f"bridge ws -> tcp {target_host}:{target_port}")
+    dbg = os.environ.get("BRIDGE_DEBUG", "0") == "1"
+    stats = {"tx": 0, "rx": 0}
 
     async def ws_to_tcp():
         while True:
             op, payload = await read_ws_frame(reader)
             if op == 0x8:
+                if dbg:
+                    log(f"  client closed ws (tx={stats['tx']} rx={stats['rx']})")
                 tcp_w.close()
                 return
             if op == 0x9:
@@ -156,13 +178,21 @@ async def ws_bridge(reader, writer, target_host, target_port):
                 await writer.drain()
                 continue
             if payload:
+                if dbg:
+                    stats["tx"] += len(payload)
+                    log(f"  c->s {len(payload)}B {payload[:48].hex()}")
                 tcp_w.write(payload)
                 await tcp_w.drain()
 
     async def tcp_to_ws():
         while True:
             data = await tcp_r.read(65536)
+            if dbg and data:
+                stats["rx"] += len(data)
+                log(f"  s->c {len(data)}B {data[:48].hex()}")
             if not data:
+                if dbg:
+                    log(f"  tcp closed (tx={stats['tx']} rx={stats['rx']})")
                 writer.write(ws_frame(b"", 0x8))
                 await writer.drain()
                 return
@@ -310,11 +340,24 @@ async def handle(reader, writer):
                 port = int(qs.get("port", ["7911"])[0])
             except ValueError:
                 port = 7911
-            if BRIDGE_TARGET:
+            if BRIDGE_FORCE and BRIDGE_TARGET:
                 h, _, p = BRIDGE_TARGET.partition(":")
                 host = h
                 if p.isdigit():
                     port = int(p)
+            elif BRIDGE_TARGET and (not BRIDGE_ALLOW_ANY or host in ("127.0.0.1", "localhost")):
+                # 예전 기본값(127.0.0.1)으로 온 요청은 BRIDGE_TARGET 으로 보낸다(호환)
+                h, _, p = BRIDGE_TARGET.partition(":")
+                host = h
+                if p.isdigit():
+                    port = int(p)
+            if not _valid_host(host) or not (1 <= port <= 65535):
+                log(f"ws reject host={host!r} port={port}")
+                writer.write(resp(400, "Bad Request"))
+                await writer.drain()
+                writer.close()
+                return
+            log(f"ws -> {host}:{port}")
             accept = base64.b64encode(hashlib.sha1(key.encode() + WS_GUID).digest()).decode()
             proto = headers.get("sec-websocket-protocol")
             extra = f"Sec-WebSocket-Protocol: {proto.split(',')[0].strip()}\r\n" if proto else ""
@@ -374,7 +417,17 @@ async def handle(reader, writer):
         # ---- 서버 대전(온라인) 방 목록 프록시 : <LOBBY_UPSTREAM>/api/getrooms ----
         # 브라우저는 CORS 때문에 멀티롤 API 를 직접 못 부르므로 같은 오리진에서 중계한다.
         if path == "/api/getrooms":
-            data = await asyncio.get_event_loop().run_in_executor(None, fetch_lobby_rooms)
+            qs = urllib.parse.parse_qs(parsed.query)
+            srv = (qs.get("srv") or [""])[0]
+            proto = (qs.get("proto") or ["http"])[0].lower()
+            try:
+                rport = int((qs.get("port") or ["0"])[0])
+            except ValueError:
+                rport = 0
+            if srv and LOBBY_ALLOW_ANY and _valid_host(srv) and 1 <= rport <= 65535 and proto in ("http", "https"):
+                data = await asyncio.get_event_loop().run_in_executor(None, fetch_lobby_rooms, srv, rport, proto)
+            else:
+                data = await asyncio.get_event_loop().run_in_executor(None, fetch_lobby_rooms)
             if data is None:
                 writer.write(resp(502, "Bad Gateway", b'{"rooms":[]}', "application/json; charset=utf-8"))
             else:

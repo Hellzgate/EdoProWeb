@@ -479,7 +479,7 @@ index 7b3360f..5c7c900 100644
  					}
  					DuelClient::is_local_host = true;
 diff --git a/gframe/server_lobby.cpp b/gframe/server_lobby.cpp
-index 9b0ed21..fff0280 100644
+index 9b0ed21..146e7ed 100644
 --- a/gframe/server_lobby.cpp
 +++ b/gframe/server_lobby.cpp
 @@ -1,3 +1,5 @@
@@ -539,12 +539,13 @@ index 9b0ed21..fff0280 100644
  std::vector<RoomInfo> ServerLobby::roomsVector;
  std::vector<ServerInfo> ServerLobby::serversVector;
  std::atomic_bool ServerLobby::is_refreshing{ false };
-@@ -176,6 +222,21 @@ void ServerLobby::GetRoomsThread() {
+@@ -176,6 +222,22 @@ void ServerLobby::GetRoomsThread() {
  	mainGame->roomListTable->setVisible(false);
  
  	std::string retrieved_data;
 +#ifdef __EMSCRIPTEN__
-+	const auto url = epro::format("{}://{}:{}/api/getrooms", serverInfo.GetProtocolString(), serverInfo.roomaddress, serverInfo.roomlistport);
++	/* [web] 같은 오리진 프록시에 어느 서버의 목록인지 알려준다 */
++	const auto url = epro::format("/api/getrooms?srv={}&port={}&proto={}", serverInfo.roomaddress, serverInfo.roomlistport, serverInfo.GetProtocolString());
 +	const bool fetch_ok = WebHttpGetPath(url, retrieved_data);
 +	if(!fetch_ok) {
 +		if(gGameConfig->logDownloadErrors)
@@ -561,7 +562,7 @@ index 9b0ed21..fff0280 100644
  	char curl_error_buffer[CURL_ERROR_SIZE];
  	auto curl_handle = curl_easy_init();
  	curl_easy_setopt(curl_handle, CURLOPT_ERRORBUFFER, curl_error_buffer);
-@@ -207,6 +268,7 @@ void ServerLobby::GetRoomsThread() {
+@@ -207,6 +269,7 @@ void ServerLobby::GetRoomsThread() {
  		has_refreshed = true;
  		return;
  	}
@@ -569,7 +570,7 @@ index 9b0ed21..fff0280 100644
  
  	roomsVector.clear();
  	try {
-@@ -267,7 +329,12 @@ void ServerLobby::RefreshRooms() {
+@@ -267,7 +330,12 @@ void ServerLobby::RefreshRooms() {
  	is_refreshing = true;
  	mainGame->roomListTable->clearRows();
  	GUIUtils::ChangeCursor(mainGame->device.get(), irr::gui::ECI_WAIT);
@@ -582,6 +583,41 @@ index 9b0ed21..fff0280 100644
  }
  bool ServerLobby::HasRefreshedRooms() {
  	return has_refreshed;
+@@ -276,11 +344,24 @@ void ServerLobby::JoinServer(bool host) {
+ 	mainGame->ebNickName->setText(mainGame->ebNickNameOnline->getText());
+ 	auto selected = mainGame->serverChoice->getSelected();
+ 	if (selected < 0) return;
++#ifdef __EMSCRIPTEN__
++	/* [web] 브라우저는 DNS/TCP 를 못 한다 -> 호스트 이름을 그대로 WS 브리지에 넘기고
++	   C++ 에는 루프백 주소를 준다(브리지가 실제 대상으로 연결). */
++	const auto& web_srv = serversVector[selected];
++	EM_ASM({ window.__edoproTarget = {}; window.__edoproTarget.host = UTF8ToString($0); window.__edoproTarget.port = $1; },
++		web_srv.address.c_str(), static_cast<int>(web_srv.duelport));
++	static const unsigned char web_loopback[4] = { 127, 0, 0, 1 };
++	const epro::Address server_address{ web_loopback, epro::Address::INET };
++	const uint16_t server_port = web_srv.duelport;
++#else
+ 	const auto& serverinfo = serversVector[selected].Resolved();
+ 	if(serverinfo.address.family == epro::Address::UNK)
+ 		return;
++	const epro::Address& server_address = serverinfo.address;
++	const uint16_t server_port = serverinfo.port;
++#endif
+ 	if(host) {
+-		if(!DuelClient::StartClient(serverinfo.address, serverinfo.port))
++		if(!DuelClient::StartClient(server_address, server_port))
+ 			return;
+ 	} else {
+ 		//client
+@@ -299,7 +380,7 @@ void ServerLobby::JoinServer(bool host) {
+ 			mainGame->dInfo.secret.pass = text;
+ 		} else
+ 			mainGame->dInfo.secret.pass.clear();
+-		if(!DuelClient::StartClient(serverinfo.address, serverinfo.port, room->id, false))
++		if(!DuelClient::StartClient(server_address, server_port, room->id, false))
+ 			return;
+ 	}
+ }
 diff --git a/gframe/utils_gui.cpp b/gframe/utils_gui.cpp
 index 9d561e5..e4d0a4c 100644
 --- a/gframe/utils_gui.cpp

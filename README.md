@@ -14,8 +14,8 @@
 
 | 항목 | 값 |
 |---|---|
-| 버전 | **1.3.0** (`VERSION`) |
-| 이미지 | `edopro-web:1.3.0` (약 285MB, `python:3.12-alpine` + `git`) |
+| 버전 | **1.4.0** (`VERSION`) |
+| 이미지 | `edopro-web:1.4.0` (약 285MB, `python:3.12-alpine` + `git`) |
 | 포트 | **7556** → 컨테이너 8080 |
 | 게임 URL | <http://192.168.0.53:7556> |
 | 저장소 관리 | <http://192.168.0.53:7556/repos.html> |
@@ -94,13 +94,26 @@ edopro-web/
 | 카드 이미지 표시(덱 편집기·듀얼) | ✅ v1.1.0 |
 | 듀얼 시작 → 실제 진행(봇 대전) | ✅ v1.1.0 |
 | 듀얼 필드(존·마트·카드) 렌더링 | ✅ v1.2.1 |
-| **서버 대전(온라인) — 서버/방 목록, 방 만들기·입장** | ✅ v1.3.0 |
+| **서버 대전(온라인) — 여러 서버(6) 각각 접속** | ✅ v1.4.0 |
 
 자세한 원인과 다음 단계는 [docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md).
 
 ---
 
 ## 5. 변경 이력
+
+### v1.4.0 (2026-11-10)
+
+- **여러 서버 접속 지원** (`config/configs.json` 의 `servers` 배열 그대로)
+  - 서버마다 **방 목록**을 가져온다: `/api/getrooms?srv=<host>&port=<port>&proto=<http|https>` (컨테이너 프록시, CORS·HTTPS 우회)
+  - 서버마다 **TCP 접속**: 클라이언트가 호스트 이름을 `window.__edoproTarget` 으로 넘기고
+    `evlite.c` 가 `ws://<페이지>/ws?host=<이름>&port=<포트>` 로 연결 → `server.py` 가 컨테이너에서 **DNS+TLS 없이 TCP** 로 붙는다
+  - `BRIDGE_ALLOW_ANY=1`(기본) 이면 요청한 host:port 로 접속. `BRIDGE_FORCE=1` 이면 기존처럼 `BRIDGE_TARGET` 고정
+  - wasm 은 DNS 를 못 하므로 `ServerLobby::JoinServer` 가 **호스트 이름을 그대로** 브리지에 전달(루프백 주소 사용)
+- 서버 목록 기본값 = 사용자 `configs.json` 6개(Hellzmain · EU 캐주얼/경쟁전 · US 캐주얼/경쟁전 · 중국)
+- 실측: EU 경쟁전 목록 **5방**(Veto, Kaiser, goose, muln, RSP Fenrir) 표시,
+  **방 만들기 성공**(호스트 준비 창), **`muln` 방 입장 성공**(GOAT · BO3 · 제한 100)
+- `server.py` 에 `BRIDGE_DEBUG=1` 진단(패킷 hex 로그), `/ws` 대상 검증 추가
 
 ### v1.3.0 (2026-11-10)
 

@@ -215,7 +215,15 @@ static void ws_connect(bufferevent* bev, const char* host, unsigned short port) 
 		var b = (typeof window !== 'undefined' && window.EDOPRO_WS_BASE) ? window.EDOPRO_WS_BASE : 'ws://127.0.0.1:9001/ws';
 		stringToUTF8(b, $0, 256);
 	}, base);
-	snprintf(url, sizeof(url), "%s?host=%s&port=%u", base, host, (unsigned)port);
+	/* 서버 대전: C++ 가 window.__edoproTarget(호스트 이름)을 지정하면 그것을 쓴다 */
+	char target[256];
+	target[0] = 0;
+	const int has_target = EM_ASM_INT({
+		var t = (typeof window !== 'undefined') ? window.__edoproTarget : null;
+		if (t && t.host) { stringToUTF8(String(t.host), $0, 256); window.__edoproTarget = null; return 1; }
+		return 0;
+	}, target);
+	snprintf(url, sizeof(url), "%s?host=%s&port=%u", base, has_target ? target : host, (unsigned)port);
 	fprintf(stderr, "[ws] connect %s\n", url);
 
 	EmscriptenWebSocketCreateAttributes attr;

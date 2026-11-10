@@ -133,7 +133,37 @@ Emscripten 은 마우스 좌표를 `canvas.width / rect.width` 로 환산하므�
 
 > 서버 목록은 `user_configs.json` 의 `servers` 배열이 **전부**이므로, 다른 서버를 쓰려면 그 파일을 고쳐 재링크한다.
 
-## 6. 그 밖의 제약
+## 6. 여러 서버 접속 (v1.4.0)
+
+기본 서버 목록은 `config/configs.json` 의 `servers` 배열이다(없으면 `user_configs.json`).
+`server.py` 가 **같은 오리진 프록시**로 방 목록을, **WS 브리지**로 TCP 를 중계하므로
+브라우저에서도 각 서버에 접속할 수 있다.
+
+| 단계 | 구현 |
+|---|---|
+| 서버 목록 | `configs.json` → `Game::LoadServers` (수정 시 `.data` 라 **재링크** 필요) |
+| 방 목록 | 게임 → `/api/getrooms?srv=<host>&port=<port>&proto=<http\|https>` → 프록시가 `proto://host:port/api/getrooms` |
+| TCP 접속 | 게임 → `window.__edoproTarget = {host, port}` → `evlite.c` 가 `ws://<페이지>/ws?host=<이름>&port=<포트>` → `server.py` 가 컨테이너에서 DNS 조회 후 TCP |
+
+환경변수
+- `BRIDGE_ALLOW_ANY=1`(기본): 클라이언트가 요청한 host:port 로 접속(여러 서버)
+- `BRIDGE_FORCE=1` + `BRIDGE_TARGET`: 예전처럼 한 곳으로 고정
+- `LOBBY_ALLOW_ANY=1`(기본): `/api/getrooms?srv=...` 허용
+- `BRIDGE_DEBUG=1`: 패킷 hex 로그(`c->s`, `s->c`, 종료 주체) — 프로토콜 문제 진단용
+
+**실측(2026-11-10)**
+- 서버 6개 표시(Hellzmain · EU 캐주얼/경쟁전 · US 캐주얼/경쟁전 · 중국)
+- EU 경쟁전 방 목록 **5방**(Veto/Diamond Dude, Kaiser, goose, muln, RSP Fenrir)
+- **방 만들기** → 호스트 준비 창 정상
+- **`muln` 방 입장** → GOAT · BO3 · 제한 100 · 상대 `muln` 표시
+- 중국(HTTPS 443) 목록 200, TCP 44444 연결 101 확인
+
+**주의**
+- 방 목록은 **새로 고침 시점의 스냅샷**이다. 이미 시작/정원 초과된 방에 들어가면
+  `연결이 끊어졌습니다` 가 뜰 수 있다(서버가 먼저 끊음). 다른 방을 선택하면 된다.
+- 호스트 준비 창의 `관전자 수` 표기가 서버에 따라 어긋나 보일 수 있다(표시 문제, 진행에는 영향 없음).
+
+## 7. 그 밖의 제약
 
 - **로컬 호스팅**: 브라우저는 TCP 서버를 열 수 없으므로 "방 만들기"는 실제로는 **멀티롤 서버에 접속**한다.
   봇은 NAS 패널(`POST /api/bot/start`)로 투입한다.
