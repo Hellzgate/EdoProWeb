@@ -53,6 +53,7 @@ docker run -d --name edopro-web --restart unless-stopped \
 | [docs/PATCHES.md](docs/PATCHES.md) | 원본 소스에 가한 **모든 변경** 목록과 이유 |
 | [docs/API.md](docs/API.md) | 서버 HTTP/WS API |
 | [docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md) | 남은 문제·다음 단계 |
+| [docs/MOBILE-WEB.md](docs/MOBILE-WEB.md) | **모바일 브라우저 상태·진단 방법**(`/api/jlog`, Range, 로딩 오버레이) |
 | [LICENSE-NOTICE.md](LICENSE-NOTICE.md) | AGPL 등 라이선스 고지 |
 
 ---
@@ -109,6 +110,18 @@ edopro-web/
 ---
 
 ## 5. 변경 이력
+
+### 1.10.14 (2026-11-11) — **미릴리스**(모바일 진단/수정)
+
+- **정적 응답 Range 지원**: `Range: bytes=a-b` → `206 + Content-Range`, `Accept-Ranges: bytes`.
+  모바일 실측 4MB 조각 0.10~0.22초 · 20MB 0.26초 · 31MB 전체 0.41초.
+- **로딩 오버레이**: `EDOPRO` 로고 + 진행바 + `불러오는 중… n%` + 실패 시 **사유/[다시 시도]**.
+  기존 셸 CSS(`body>*{display:none!important}`)가 상태 UI 를 모두 숨겨 화면이 **검게만** 보이던 문제 해결.
+- **`/api/jlog`**: 브라우저 콘솔·오류·하트비트(`ready/frames/canvas/called/lost/vis`)를 서버 로그로.
+  DevTools 없이 폰 상태를 `docker logs` 로 확인.
+- **진단 페이지**: `/webgltest.html` · `/probe.html` · `/probe2.html`.
+- 원인 확정: 탭이 백그라운드로 가면 브라우저가 180MB 전송을 중단
+  (`wasm streaming compile failed: … Response body loading was aborted`). 상세 [docs/MOBILE-WEB.md](docs/MOBILE-WEB.md).
 
 ### v1.10.0 (2026-11-11)
 

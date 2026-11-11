@@ -10,6 +10,9 @@ COPY web/edopro-full.wasm /app/web/edopro-full.wasm
 COPY web/edopro-full.data /app/web/edopro-full.data
 COPY web/repos.html /app/web/repos.html
 COPY web/bot.html /app/web/bot.html
+COPY web/webgltest.html /app/web/webgltest.html
+COPY web/probe.html /app/web/probe.html
+COPY web/probe2.html /app/web/probe2.html
 
 ENV PORT=8080 \
     ROOT=/app/web \

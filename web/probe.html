@@ -1,0 +1,76 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EDOPro web probe</title>
+<style>
+  html, body { margin: 0; background: #0e1013; color: #e6e6e6; font: 13px/1.5 monospace; }
+  #out { padding: 10px; white-space: pre-wrap; word-break: break-all; }
+  b { color: #7fd4ff; }
+  .ok { color: #8ee08e; }
+  .bad { color: #ff8f8f; }
+</style>
+<pre id="out">probe start</pre>
+<script>
+var out = document.getElementById('out');
+function log(t) { out.textContent += "\n" + t; }
+
+function hms(ms) { return (ms / 1000).toFixed(2) + "s"; }
+
+function xhrGet(url, range, timeoutMs) {
+  return new Promise(function (res) {
+    var x = new XMLHttpRequest();
+    var t0 = Date.now();
+    var last = 0, stall = 0;
+    x.open('GET', url, true);
+    x.responseType = 'arraybuffer';
+    if (range) x.setRequestHeader('Range', range);
+    x.timeout = timeoutMs || 45000;
+    x.onprogress = function (e) {
+      var now = Date.now();
+      if (e.loaded === last && now - t0 > 2000) stall = now - t0;
+      last = e.loaded;
+      log('   ... ' + e.loaded + ' B (' + hms(now - t0) + ')');
+    };
+    x.onload = function () {
+      res({ ok: x.status >= 200 && x.status < 300, status: x.status,
+            bytes: x.response ? x.response.byteLength : 0,
+            clen: x.getResponseHeader('Content-Range') || x.getResponseHeader('Content-Length'),
+            ms: Date.now() - t0 });
+    };
+    x.onerror = function () { res({ ok: false, status: 'neterr', bytes: 0, clen: '', ms: Date.now() - t0 }); };
+    x.ontimeout = function () { res({ ok: false, status: 'timeout', bytes: last, clen: '', ms: Date.now() - t0 }); };
+    x.onabort = function () { res({ ok: false, status: 'abort', bytes: last, clen: '', ms: Date.now() - t0 }); };
+    x.send();
+  });
+}
+
+function report(tag, r) {
+  var kbs = r.ms > 0 ? Math.round(r.bytes / 1024 * 1000 / r.ms) : 0;
+  var cls = r.ok && r.bytes > 0 ? 'ok' : 'bad';
+  log('<span class="' + cls + '">' + tag + ': status=' + r.status + ' bytes=' + r.bytes +
+      ' (' + (r.bytes / 1048576).toFixed(2) + 'MB) ' + hms(r.ms) + ' ' + kbs + 'KB/s ' +
+      (r.clen || '') + '</span>');
+}
+
+async function run() {
+  log('ua ' + navigator.userAgent);
+  log('cores ' + navigator.hardwareConcurrency + ' mem ' + (navigator.deviceMemory || '?') + 'GB dpr ' + window.devicePixelRatio);
+  try {
+    var c = document.createElement('canvas');
+    var g = c.getContext('webgl') || c.getContext('experimental-webgl');
+    log('webgl ' + (g ? 'OK ' + g.getParameter(g.VERSION) : 'NULL'));
+  } catch (e) { log('webgl EX ' + e); }
+
+  report('health', await xhrGet('/api/health?t=' + Date.now(), null, 15000));
+  report('range 0-4MB', await xhrGet('/edopro-full.data', 'bytes=0-4194303', 30000));
+  report('range 4-8MB', await xhrGet('/edopro-full.data', 'bytes=4194304-8388607', 30000));
+  report('range 8-12MB', await xhrGet('/edopro-full.data', 'bytes=8388608-12582911', 30000));
+  report('range 12-16MB', await xhrGet('/edopro-full.data', 'bytes=12582912-16777215', 30000));
+  log('<b>--- full files ---</b>');
+  report('wasm full 31MB', await xhrGet('/edopro-full.wasm', null, 90000));
+  report('data full 146MB', await xhrGet('/edopro-full.data', null, 90000));
+  log('<b>done</b>');
+}
+
+run().catch(function (e) { log('FATAL ' + e); });
+</script>

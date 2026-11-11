@@ -1,0 +1,27 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WebGL test</title>
+<style>html,body{margin:0;background:#111;color:#fff;font:16px monospace}canvas{display:block;width:100vw;height:60vh;background:#000}#out{padding:8px;white-space:pre-wrap}</style>
+<canvas id="c"></canvas>
+<div id="out">start…</div>
+<script>
+var out = document.getElementById('out');
+function log(t){ out.textContent += "\n" + t; }
+try {
+  var c = document.getElementById('c');
+  var gl = c.getContext('webgl') || c.getContext('experimental-webgl');
+  if (!gl) { log('webgl1 = NULL'); }
+  else {
+    log('webgl1 OK ' + gl.getParameter(gl.VERSION));
+    log('renderer ' + gl.getParameter(gl.RENDERER));
+    log('size ' + c.width + 'x' + c.height);
+    gl.clearColor(0.1, 0.6, 0.9, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+  }
+  var c2 = document.createElement('canvas');
+  var gl2 = c2.getContext('webgl2');
+  log('webgl2 = ' + (gl2 ? 'OK' : 'NULL'));
+  log('ua ' + navigator.userAgent.slice(0, 80));
+} catch (e) { log('EX ' + e); }
+</script>

@@ -33,9 +33,193 @@ CSS = (
     "#edopro-drop.on{display:flex!important}"
     "#edopro-hint{display:none!important;position:fixed;left:0;right:0;bottom:10px;text-align:center;color:#8b93a1;font:12px sans-serif;z-index:99997;pointer-events:none}"
     "#edopro-hint.on{display:block!important}"
+    "#edopro-diag{display:none!important;position:fixed;left:6px;top:6px;max-width:92vw;"
+    "background:rgba(0,0,0,.78);color:#9fe3a0;font:11px/1.45 monospace;padding:6px 8px;"
+    "border-radius:6px;z-index:99999;white-space:pre-wrap}"
+    "#edopro-diag.on{display:block!important}"
     "</style>"
 )
 
+DIAG = r"""
+<script>
+/* ?diag=1 이면 화면 좌상단에 WebGL/오류 상태를 표시한다(모바일 진단용) */
+(function () {
+  if (location.search.indexOf('diag') < 0) return;
+  var el = document.createElement('div');
+  el.id = 'edopro-diag';
+  el.className = 'on';
+  el.textContent = 'diag start';
+  document.body.appendChild(el);
+  var lines = [];
+  function add(t) { lines.push(t); if (lines.length > 12) lines.shift(); el.textContent = lines.join('\n'); }
+  window.__diag = add;
+
+  window.addEventListener('error', function (e) {
+    add('ERR ' + (e.message || '') + ' @' + (e.lineno || 0));
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    add('REJ ' + ((e.reason && (e.reason.message || e.reason)) || ''));
+  });
+
+  setTimeout(function () {
+    var c = document.querySelector('canvas');
+    add('canvas ' + (c ? (c.width + 'x' + c.height + ' css ' + Math.round(c.getBoundingClientRect().width)) : 'none'));
+    try {
+      var t = document.createElement('canvas');
+      var g1 = t.getContext('webgl') || t.getContext('experimental-webgl');
+      add('webgl1 ' + (g1 ? 'OK' : 'NULL') + (g1 ? (' ' + g1.getParameter(g1.VERSION)) : ''));
+    } catch (e) { add('webgl1 EX ' + e); }
+    try {
+      var t2 = document.createElement('canvas');
+      var g2 = t2.getContext('webgl2');
+      add('webgl2 ' + (g2 ? 'OK' : 'NULL'));
+    } catch (e) { add('webgl2 EX ' + e); }
+    try {
+      var mc = Module && Module.canvas;
+      add('module canvas ' + (mc ? (mc.width + 'x' + mc.height) : 'none'));
+      add('fs /pics ' + (FS.readdir('/pics').length) + ' /sound ' + (FS.readdir('/sound').length));
+      add('calledRun ' + (Module.calledRun ? 1 : 0));
+    } catch (e) { add('module EX ' + e); }
+  }, 12000);
+})();
+</script>
+"""
+
+
+EDOPRO_JLOG = r"""
+<script>
+/* 브라우저 콘솔/오류를 서버(/api/jlog)로 보낸다 — 모바일에서 DevTools 없이 진단하기 위함 */
+(function () {
+  var sent = 0;
+  function send(m) {
+    if (sent > 400) return;
+    sent++;
+    try { navigator.sendBeacon('/api/jlog?m=' + encodeURIComponent(String(m).slice(0, 380))); } catch (e) {}
+  }
+  window.__jlog = send;
+  var names = ['log', 'warn', 'error'];
+  for (var i = 0; i < names.length; i++) {
+    (function (name) {
+      var orig = console[name];
+      console[name] = function () {
+        try {
+          var a = [];
+          for (var k = 0; k < arguments.length && k < 4; k++) a.push(arguments[k]);
+          send(name + ' ' + a.join(' ').slice(0, 340));
+        } catch (e) {}
+        return orig.apply(console, arguments);
+      };
+    })(names[i]);
+  }
+  window.addEventListener('error', function (e) {
+    var f = String(e.filename || '').split('/').pop();
+    send('ERR ' + (e.message || '') + ' @' + f + ':' + e.lineno + ':' + e.colno);
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    var r = e.reason;
+    send('REJ ' + ((r && (r.stack || r.message)) || r));
+  });
+  /* 프레임/캔버스 상태 하트비트 (모바일에서 화면이 안 나올 때 원인 파악용) */
+  var __frames = 0;
+  (function __tick() { __frames++; requestAnimationFrame(__tick); })();
+  var __hb = 0;
+  setInterval(function () {
+    __hb++;
+    var c = document.querySelector('canvas');
+    var lost = '?';
+    try {
+      var gl = c && (c.getContext('webgl2') || c.getContext('webgl') || c.getContext('experimental-webgl'));
+      if (gl && gl.isContextLost) lost = gl.isContextLost() ? 1 : 0;
+    } catch (e) { lost = 'EX'; }
+    var r = c && c.getBoundingClientRect ? c.getBoundingClientRect() : null;
+    send('hb' + __hb + ' ready=' + document.readyState + ' frames=' + __frames +
+         ' canvas=' + (c ? c.width + 'x' + c.height : '-') +
+         ' css=' + (r ? Math.round(r.width) + 'x' + Math.round(r.height) : '-') +
+         ' called=' + ((window.Module && Module.calledRun) ? 1 : 0) +
+         ' lost=' + lost + ' vis=' + document.visibilityState);
+  }, 5000);
+  send('page start ' + location.href.slice(0, 120) + ' ua=' + navigator.userAgent.slice(0, 60));
+})();
+</script>
+"""
+
+EDOPRO_LOAD = r"""
+<style>
+#edopro-load{position:fixed;inset:0;z-index:100000;display:flex!important;flex-direction:column;
+  align-items:center;justify-content:center;gap:14px;background:#0d0f13;color:#dfe5ee;
+  font:14px/1.5 'Malgun Gothic','Noto Sans KR',sans-serif;text-align:center;padding:24px}
+#edopro-load .logo{font:700 30px/1 system-ui,sans-serif;letter-spacing:.14em;color:#9cc3ff}
+#edopro-load .bar{width:min(360px,72vw);height:6px;border-radius:3px;background:#232833;overflow:hidden}
+#edopro-load .bar>i{display:block;height:100%;width:0;border-radius:3px;background:linear-gradient(90deg,#4f8cff,#7cd0ff);transition:width .25s}
+#edopro-load .msg{font-size:13px;color:#98a3b6;min-height:20px}
+#edopro-load .err{max-width:min(560px,86vw);font-size:12px;color:#ff9b9b;white-space:pre-wrap}
+#edopro-load.off{display:none!important}
+#edopro-load button{margin-top:6px;padding:9px 22px;border-radius:8px;border:1px solid #3d4759;
+  background:#1b2130;color:#dfe5ee;font-size:14px;display:none}
+#edopro-load button.on{display:inline-block}
+</style>
+<div id="edopro-load">
+  <div class="logo">EDOPRO</div>
+  <div class="bar"><i id="edopro-bar"></i></div>
+  <div class="msg" id="edopro-lmsg">&#48520;&#47084;&#50724;&#45716; &#51473;&#8230;</div>
+  <div class="err" id="edopro-lerr"></div>
+  <button id="edopro-retry" type="button">&#45796;&#49884; &#49884;&#46020;</button>
+</div>
+<script>
+(function () {
+  var box = document.getElementById('edopro-load');
+  var bar = document.getElementById('edopro-bar');
+  var msg = document.getElementById('edopro-lmsg');
+  var err = document.getElementById('edopro-lerr');
+  var btn = document.getElementById('edopro-retry');
+  var t0 = Date.now();
+  var done = false;
+
+  function show(text) { if (msg) msg.textContent = text; }
+  function fail(text) {
+    var e = String(text || '');
+    if (err && !err.textContent) err.textContent = e.slice(0, 300);
+    if (btn) btn.classList.add('on');
+    show('불러오지 못했습니다. 네트워크를 확인하고 다시 시도하세요.');
+    if (window.__jlog) window.__jlog('LOAD-FAIL ' + e.slice(0, 200));
+  }
+  if (btn) btn.onclick = function () { location.reload(); };
+
+  /* emscripten 셸이 갱신하는 #status 를 읽어 진행률을 옮겨온다 */
+  var st = document.getElementById('status');
+  var tick = setInterval(function () {
+    if (done) { clearInterval(tick); return; }
+    try {
+      if (window.Module && Module.calledRun) {
+        done = true; clearInterval(tick);
+        box.classList.add('off');
+        return;
+      }
+    } catch (e) {}
+    var txt = st ? (st.textContent || '') : '';
+    var m = txt.match(/\((\d+(?:\.\d+)?)\/(\d+(?:\.\d+)?)\)/);
+    if (m && bar) {
+      var pct = Math.min(100, Math.max(0, parseFloat(m[1]) / parseFloat(m[2]) * 100));
+      bar.style.width = pct.toFixed(1) + '%';
+      show('불러오는 중… ' + Math.round(pct) + '%');
+    } else if (txt) {
+      show(txt.replace(/\s+/g, ' ').slice(0, 80));
+    }
+    var sec = (Date.now() - t0) / 1000;
+    if (sec > 45 && !err.textContent) {
+      show('불러오는 중… ' + Math.round(sec) + '초 (파일이 커서 시간이 걸립니다)');
+    }
+  }, 300);
+
+  window.addEventListener('error', function (e) { if (e && e.message) fail(e.message); });
+  window.addEventListener('unhandledrejection', function (e) {
+    var r = e && e.reason;
+    fail((r && (r.message || r)) || 'unknown');
+  });
+  window.addEventListener('offline', function () { fail('네트워크 연결이 끊겼습니다.'); });
+})();
+</script>
+"""
 BOOT = r"""
 <script>
 window.EDOPRO_WS_BASE = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
@@ -418,6 +602,10 @@ if "</body>" in s:
     s = s.replace("</body>", BOOT + "</body>", 1)
 else:
     s += BOOT
+
+s = s.replace("</head>", EDOPRO_JLOG + "</head>", 1)
+s = s.replace("<body>", "<body>" + EDOPRO_LOAD, 1)
+s = s.replace("</body>", DIAG + "</body>", 1)
 
 io.open(p, "w", encoding="utf-8").write(s)
 print("postprocess: 레이아웃 + 사용자데이터(덱/리플레이) + WS + admin 주입 완료")

@@ -78,8 +78,35 @@
 멀티롤 웹 패널 API 프록시(`BOT_PANEL_URL` + `BOT_PANEL_TOKEN`). 게임 화면은 건드리지 않고
 **서버 방에 봇을 투입**한다. `/bot` 페이지가 이 API 를 사용한다.
 
+### `GET /api/jlog?m=<메시지>` (1.10.14)
+
+브라우저의 콘솔/오류를 서버 로그로 남깁니다(모바일 DevTools 대체).
+
+- 응답: `204 No Content`
+- 로그: `[web] JS <메시지>` (최대 400자, `navigator.sendBeacon` 으로 전송)
+- 셸 후처리가 `console.log/warn/error`·`window.onerror`·`unhandledrejection` 을 자동 연결하고
+  5초마다 하트비트(`ready`·`frames`·`canvas`·`called`·`lost`·`vis`)를 보냅니다.
+- 진단 페이지: `/webgltest.html`, `/probe.html`, `/probe2.html`
+
+### Range 요청 (1.10.14)
+
+모든 정적 파일이 `Range: bytes=a-b` 를 지원합니다.
+
+```
+요청  Range: bytes=0-4194303
+응답  HTTP/1.1 206 Partial Content
+      Content-Range: bytes 0-4194303/145946307
+      Accept-Ranges: bytes
+      Connection: close
+```
+
 ## 참고
 
-- 정적 응답에는 `Cross-Origin-Opener-Policy: same-origin`,
-  `Cross-Origin-Embedder-Policy: require-corp` 를 붙입니다(SharedArrayBuffer 대비).
+- 정적 응답은 **`Connection: close`**(단일 요청/단일 연결) + 1MB 청크 전송입니다.
+  모바일에서 keep-alive 소켓 재사용이 멈추는 사례가 있어 바꿨습니다.
+- **COOP/COEP 헤더는 사용하지 않습니다** — SharedArrayBuffer/스레드를 쓰지 않고,
+  모바일에서 이 헤더가 붙은 대용량 응답이 멈추는 사례가 있었습니다.
 - 포트 8080 은 컨테이너 내부 고정이며, 호스트 노출은 `-p 7556:8080` 로 합니다.
+- 초기 전송량은 약 180MB(wasm 31.5 + data 146 + js 2.25)입니다. 감축 계획은
+  [MOBILE-WEB.md](MOBILE-WEB.md) §6 참고.
+

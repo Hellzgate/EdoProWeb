@@ -615,8 +615,10 @@ async def read_head(reader):
 
 
 def resp(code, reason, body=b"", ctype="text/plain; charset=utf-8", extra=""):
+    # Connection: close — keep-alive 로 남은 소켓을 브라우저가 재사용하려다 멈추는 사례가 있어(모바일)
+    # 모든 응답을 단일 요청/단일 연결로 처리한다.
     hdr = (f"HTTP/1.1 {code} {reason}\r\nContent-Type: {ctype}\r\nContent-Length: {len(body)}\r\n"
-           "Cross-Origin-Opener-Policy: same-origin\r\nCross-Origin-Embedder-Policy: require-corp\r\n"
+           "Connection: close\r\n"
            f"{extra}\r\n")
     return hdr.encode() + body
 
@@ -859,7 +861,18 @@ async def handle(reader, writer):
             writer.close()
             return
 
+        if path == "/api/jlog":
+            qs = urllib.parse.parse_qs(parsed.query)
+            msg = (qs.get("m") or [""])[0]
+            if msg:
+                log("JS " + msg.replace("\n", " | ")[:400])
+            writer.write(resp(204, "No Content", b"", "text/plain; charset=utf-8"))
+            await writer.drain()
+            writer.close()
+            return
+
         # ---- static ----
+        _ua = headers.get("user-agent", "-")[:40]
         if method not in ("GET", "HEAD"):
             writer.write(resp(405, "Method Not Allowed"))
             await writer.drain()
@@ -882,17 +895,56 @@ async def handle(reader, writer):
 
         ext = os.path.splitext(full)[1].lower()
         size = os.path.getsize(full)
-        writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: {MIME.get(ext, 'application/octet-stream')}\r\n"
-                      f"Content-Length: {size}\r\nCross-Origin-Opener-Policy: same-origin\r\n"
-                      "Cross-Origin-Embedder-Policy: require-corp\r\nCache-Control: no-cache\r\n\r\n").encode())
+
+        # ---- Range 지원 (모바일 청크 로더가 조각으로 받아간다) ----
+        start, end = 0, size - 1
+        partial = False
+        rng = headers.get("range", "") or ""
+        if rng.startswith("bytes=") and size > 0:
+            m = re.match(r"bytes=(\d*)-(\d*)", rng)
+            if m and (m.group(1) or m.group(2)):
+                if m.group(1):
+                    start = int(m.group(1))
+                    if m.group(2):
+                        end = min(int(m.group(2)), size - 1)
+                else:
+                    start = max(0, size - int(m.group(2)))
+                if start >= size:
+                    writer.write(resp(416, "Range Not Satisfiable", b"416",
+                                      "text/plain; charset=utf-8",
+                                      "Content-Range: bytes */%d\r\n" % size))
+                    await writer.drain()
+                    writer.close()
+                    return
+                partial = True
+        length = end - start + 1
+        if partial or size > (1 << 20):
+            log("static %s %d-%d/%d ua=%s" % (path, start, end, size, _ua))
+
+        hdr = ("HTTP/1.1 " + ("206 Partial Content" if partial else "200 OK") + "\r\n"
+               "Content-Type: " + MIME.get(ext, "application/octet-stream") + "\r\n"
+               "Content-Length: " + str(length) + "\r\n"
+               "Accept-Ranges: bytes\r\n"
+               "Connection: close\r\n"
+               "Cache-Control: no-cache\r\n")
+        if partial:
+            hdr += "Content-Range: bytes %d-%d/%d\r\n" % (start, end, size)
+        writer.write((hdr + "\r\n").encode())
+
         if method == "GET":
             with open(full, "rb") as f:
-                while True:
-                    chunk = f.read(1 << 20)
+                if start:
+                    f.seek(start)
+                remain = length
+                while remain > 0:
+                    chunk = f.read(min(1 << 20, remain))
                     if not chunk:
                         break
+                    remain -= len(chunk)
                     writer.write(chunk)
                     await writer.drain()
+                    if remain > 0:
+                        await asyncio.sleep(0)
         await writer.drain()
         writer.close()
     except Exception as e:

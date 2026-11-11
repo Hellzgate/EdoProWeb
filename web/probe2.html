@@ -1,0 +1,66 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EDOPro web probe2</title>
+<style>
+  html, body { margin: 0; background: #0e1013; color: #e6e6e6; font: 13px/1.5 monospace; }
+  #out { padding: 10px; white-space: pre-wrap; word-break: break-all; }
+  .ok { color: #8ee08e; } .bad { color: #ff8f8f; } b { color: #7fd4ff; }
+</style>
+<pre id="out">probe2 start</pre>
+<script>
+var out = document.getElementById('out');
+function log(t) { out.textContent += "\n" + t; }
+function hms(ms) { return (ms / 1000).toFixed(2) + "s"; }
+
+function xhrGet(url, range, timeoutMs) {
+  return new Promise(function (res) {
+    var x = new XMLHttpRequest();
+    var t0 = Date.now(), last = 0;
+    x.open('GET', url, true);
+    x.responseType = 'arraybuffer';
+    if (range) x.setRequestHeader('Range', range);
+    x.timeout = timeoutMs || 60000;
+    x.onprogress = function (e) {
+      if (e.loaded - last >= 4194304) log('   .. ' + (e.loaded / 1048576).toFixed(1) + 'MB ' + hms(Date.now() - t0));
+      last = e.loaded;
+    };
+    x.onload = function () {
+      res({ ok: x.status >= 200 && x.status < 300, status: x.status,
+            bytes: x.response ? x.response.byteLength : 0, ms: Date.now() - t0 });
+    };
+    x.onerror = function () { res({ ok: false, status: 'neterr', bytes: last, ms: Date.now() - t0 }); };
+    x.ontimeout = function () { res({ ok: false, status: 'timeout', bytes: last, ms: Date.now() - t0 }); };
+    x.onabort = function () { res({ ok: false, status: 'abort', bytes: last, ms: Date.now() - t0 }); };
+    x.send();
+  });
+}
+
+function report(tag, r) {
+  var kbs = r.ms > 0 ? Math.round(r.bytes / 1024 * 1000 / r.ms) : 0;
+  var cls = r.ok && r.bytes > 0 ? 'ok' : 'bad';
+  log('<span class="' + cls + '">' + tag + ': ' + r.status + ' ' + (r.bytes / 1048576).toFixed(2) +
+      'MB ' + hms(r.ms) + ' ' + kbs + 'KB/s</span>');
+}
+
+async function run() {
+  log('A. wasm range 0-3MB (200-style 4MB)');
+  report('wasm range 4MB', await xhrGet('/edopro-full.wasm', 'bytes=0-4194303', 40000));
+
+  log('B. wasm range 0-20MB (single 206)');
+  report('wasm range 20MB', await xhrGet('/edopro-full.wasm', 'bytes=0-20971519', 60000));
+
+  log('C. wasm full 31MB (plain 200)');
+  report('wasm full', await xhrGet('/edopro-full.wasm', null, 60000));
+
+  log('D. wasm range 8-12MB (offset 206)');
+  report('wasm range 8-12MB', await xhrGet('/edopro-full.wasm', 'bytes=8388608-12582911', 40000));
+
+  log('E. wasm full again (200)');
+  report('wasm full #2', await xhrGet('/edopro-full.wasm?x=2', null, 60000));
+
+  log('<b>done</b>');
+}
+
+run().catch(function (e) { log('FATAL ' + e); });
+</script>
