@@ -1,4 +1,4 @@
-# EDOPro Web (WebAssembly)
+﻿# EDOPro Web (WebAssembly)
 
 **Project Ignis: EDOPro 41.0.2** 클라이언트를 **Emscripten 으로 WebAssembly 빌드**해 브라우저에서 실행하고,
 미니PC **Docker** 에 올려 **한 포트(7556)** 로 배포하는 프로젝트입니다.
@@ -111,7 +111,7 @@ edopro-web/
 
 ## 5. 변경 이력
 
-### 1.10.14 (2026-11-11) — **미릴리스**(모바일 진단/수정)
+### 1.10.15 (2026-11-11) — **미릴리스**(모바일 진단/수정)
 
 - **정적 응답 Range 지원**: `Range: bytes=a-b` → `206 + Content-Range`, `Accept-Ranges: bytes`.
   모바일 실측 4MB 조각 0.10~0.22초 · 20MB 0.26초 · 31MB 전체 0.41초.
@@ -231,4 +231,5 @@ edopro-web/
 ### v1.0.0 (2026-11-09)
 
 - 최초 공개: wasm 빌드, 한국어, 단일 포트 Docker(정적+WS 브리지+Git API), 오디오(miniaudio)
+
 
