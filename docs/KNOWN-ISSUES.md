@@ -240,7 +240,21 @@ EDOPro 는 `configs.json` 의 `repos` 를 **libgit2** 로 clone/pull 해 카드 
 
 **사용**: 게임에서 `LAN + AI 대전 → 방 만들기 → 확인` → `/bot` 에서 방 선택 + 덱 선택 → **봇 투입**
 
-## 12. 그 밖의 제약
+## 12. BGM / 모바일 / 이미지 로딩 (v1.9.0)
+
+| 항목 | 상태 | 비고 |
+|---|---|---|
+| BGM | ✅ 40MB preload | 메뉴·듀얼·덱·승/패 등 7종 |
+| 모바일 | ⚠️ 기본 대응 | viewport + touch-action. 실기기 터치 검증은 미실시 |
+| 이미지 로딩 | ⚠️ 동기(히치 있음) | 비동기 시도는 **실패**(아래) |
+
+**이미지 비동기 실패 원인**: `GetTextureCard` 는 `preload_status` 가 `LOADED` 가 아니면 재시도하는데,
+실패 시 `LoadCardTexture` 가 `gImageDownloader->AddToDownloadQueue()` + `WAIT_DOWNLOAD` 를 반환하고,
+다음 프레임에는 `DOWNLOADING` 으로 조기 반환한다(다운로더 스레드가 없으므로 영구).
+`AddToDownloadQueue` 생략 + 상태 리셋까지 시도했으나 실제로는 카드가 뒤집힌 채 남아 **동기 구현으로 롤백**했다.
+다음 시도 시에는 `GetTextureCard` 를 wasm 전용 경로로 분리(다운로더 상태 무시 + 매 프레임 재시도)하는 편이 안전하다.
+
+## 13. 그 밖의 제약
 
 - **로컬 호스팅**: 브라우저는 TCP 서버를 열 수 없으므로 "방 만들기"는 실제로는 **멀티롤 서버에 접속**한다.
   봇은 NAS 패널(`POST /api/bot/start`)로 투입한다.

@@ -18,7 +18,9 @@ CSS = (
     "body>.emscripten_border{display:flex!important;position:fixed;inset:0;"
     "align-items:center;justify-content:center;border:0!important;background:#000}"
     "canvas.emscripten{border:0 none;background:#000;outline:none;display:block;"
-    "width:1024px;height:640px}"
+    "width:1024px;height:640px;touch-action:none;user-select:none;-webkit-user-select:none;"
+    "-webkit-tap-highlight-color:transparent}"
+    "body{touch-action:none;overscroll-behavior:none}"
     "#edopro-toast{display:block!important;position:fixed;left:50%;bottom:28px;"
     "transform:translateX(-50%);max-width:70vw;padding:9px 16px;border-radius:8px;"
     "background:rgba(20,22,28,.92);color:#e8eaf0;font:13px/1.4 'Malgun Gothic',sans-serif;"
@@ -384,7 +386,7 @@ window.addEventListener('unhandledrejection', function (e) {
 
 if "body>.emscripten_border" not in s:
     s = re.sub(r"<style>html,body\{margin:0.*?</style>", "", s, flags=re.S)
-    s = s.replace("</head>", CSS + "</head>", 1)
+    s = s.replace("</head>", '<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">' + CSS + "</head>", 1)
 else:
     s = re.sub(r"<style>html,body\{margin:0.*?</style>", CSS, s, count=1, flags=re.S)
 
@@ -397,6 +399,10 @@ if start != -1:
     end = s.find("</script>", start)
     if end != -1:
         s = s[:start] + s[end + len("</script>"):]
+
+META = '<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">'
+if 'name="viewport"' not in s:
+    s = s.replace("</head>", META + "</head>", 1)
 
 if "</body>" in s:
     s = s.replace("</body>", BOOT + "</body>", 1)

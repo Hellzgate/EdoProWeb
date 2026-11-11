@@ -352,10 +352,10 @@ index 4eae2f8..c52426f 100644
  void ImageDownloader::AddDownloadResource(PicSource src) {
  	pic_urls.push_back(src);
 diff --git a/gframe/image_manager.cpp b/gframe/image_manager.cpp
-index aed71e8..5d71354 100644
+index aed71e8..d15b973 100644
 --- a/gframe/image_manager.cpp
 +++ b/gframe/image_manager.cpp
-@@ -44,15 +44,66 @@ irr::s32 toPow2(irr::video::IVideoDriver* driver, irr::s32 size) {
+@@ -44,15 +44,70 @@ irr::s32 toPow2(irr::video::IVideoDriver* driver, irr::s32 size) {
  }
  }
  
@@ -364,29 +364,33 @@ index aed71e8..5d71354 100644
 +#include <emscripten.h>
 +#include <set>
 +
-+/* [web] 카드 이미지를 **동기 XHR** 로 받아 MEMFS 에 저장한다.
-+   (EM_ASYNC_JS 는 렌더 루프 안에서 Asyncify 중단이 실패해 호출되지 않았다 -> 동기 XHR 로 대체) */
-+extern "C" int web_fetch_pic(int code, int type) {
++/* [web] 카드 이미지를 서버에서 받아 MEMFS 에 저장한다.
++   - 비동기(fetch 후 다음 프레임) 방식은 EDOPro 의 preload 상태기계와 맞물려 재시도가 되지 않아
++     화면에 카드가 뒤집힌 채로 남았다 -> **동기 XHR** 로 확실히 받고 그 프레임에 그린다.
++   - 프레임 블로킹은 장당 10~40ms 이지만, 첫 표시에서만 발생한다. */
++static int web_fetch_pic(int code, int type) {
 +	return EM_ASM_INT({
 +		try {
-+			if(typeof Module === 'undefined' || !Module.FS) return 0;
++			if (typeof Module === 'undefined' || !Module.FS) return 0;
 +			var fs = Module.FS;
 +			var dir = ($1 === 1) ? '/pics/field/' : (($1 === 2) ? '/pics/cover/' : '/pics/');
 +			var path = dir + $0 + '.jpg';
-+			try { fs.stat(path); return 1; } catch(e) {}
-+			try { fs.mkdirTree(dir); } catch(e) {}
++			try { fs.stat(path); return 1; } catch (e) {}
++			try { fs.mkdirTree(dir); } catch (e) {}
++			var url = ($1 === 1) ? ('/img/field/' + $0 + '.jpg')
++			        : (($1 === 2) ? ('/img/cover/' + $0 + '.jpg') : ('/img/' + $0 + '.jpg'));
 +			var xhr = new XMLHttpRequest();
-+			xhr.open('GET', '/img/' + $0 + '.jpg', false);
++			xhr.open('GET', url, false);
 +			xhr.overrideMimeType('text/plain; charset=x-user-defined');
 +			xhr.send(null);
-+			if(xhr.status !== 200) return 0;
++			if (xhr.status !== 200) return 0;
 +			var txt = xhr.responseText || '';
-+			if(txt.length < 800) return 0;
++			if (txt.length < 800) return 0;
 +			var arr = new Uint8Array(txt.length);
-+			for(var i = 0; i < txt.length; i++) arr[i] = txt.charCodeAt(i) & 0xff;
++			for (var i = 0; i < txt.length; i++) arr[i] = txt.charCodeAt(i) & 0xff;
 +			fs.writeFile(path, arr);
 +			window.__picOk = (window.__picOk || 0) + 1;
-+			if(window.__picOk <= 6) console.log('[pic] ok ' + $0 + ' ' + arr.length + 'B');
++			if (window.__picOk <= 6) console.log('[pic] ok ' + $0 + ' ' + arr.length + 'B');
 +			return 1;
 +		} catch (e) { console.warn('[pic] err ' + $0 + ' ' + e); return 0; }
 +	}, code, type);
@@ -422,7 +426,7 @@ index aed71e8..5d71354 100644
  	obj_clear_lock.lock();
  	cv_clear.notify_all();
  	obj_clear_lock.unlock();
-@@ -62,6 +113,7 @@ ImageManager::~ImageManager() {
+@@ -62,6 +117,7 @@ ImageManager::~ImageManager() {
  	pic_load.unlock();
  	for(auto& thread : load_threads)
  		thread.join();
@@ -430,7 +434,7 @@ index aed71e8..5d71354 100644
  	for(auto& it : g_imgCache) {
  		if(it.second)
  			it.second->drop();
-@@ -685,6 +737,13 @@ irr::video::ITexture* ImageManager::GetTextureCard(uint32_t code, imgType type,
+@@ -685,23 +741,34 @@ irr::video::ITexture* ImageManager::GetTextureCard(uint32_t code, imgType type,
  	}();
  	if(code == 0)
  		return ret_unk;
@@ -444,7 +448,28 @@ index aed71e8..5d71354 100644
  	auto& elem = map[code];
  	if(elem.preload_status != preloadStatus::LOADED) {
  		auto status = gImageDownloader->GetDownloadStatus(code, type);
-@@ -712,6 +771,9 @@ irr::video::ITexture* ImageManager::GetTextureCard(uint32_t code, imgType type,
++#ifndef __EMSCRIPTEN__
+ 		if(status == ImageDownloader::downloadStatus::DOWNLOADING) {
+ 			if(chk)
+ 				*chk = 2;
+ 			return ret_unk;
+ 		}
++#endif
+ 		//pic will be loaded below instead
+ 		/*if(status == ImageDownloader::DOWNLOADED) {
+ 			map[code] = driver->getTexture(gImageDownloader->GetDownloadPath(code, type).data());
+ 			return map[code] ? map[code] : ret_unk;
+ 		}*/
++#ifndef __EMSCRIPTEN__
+ 		if(status == ImageDownloader::downloadStatus::DOWNLOAD_ERROR) {
+ 			map[code].texture = nullptr;
+ 			return ret_unk;
+ 		}
++#endif
+ 		if(chk)
+ 			*chk = 2;
+ 		if(elem.preload_status == preloadStatus::NONE || (elem.preload_status == preloadStatus::WAIT_DOWNLOAD && status == ImageDownloader::downloadStatus::DOWNLOADED)) {
+@@ -712,12 +779,19 @@ irr::video::ITexture* ImageManager::GetTextureCard(uint32_t code, imgType type,
  				if(load_result.status == loadStatus::LOAD_OK) {
  					rmap = driver->addTexture(load_result.path.data(), load_result.texture);
  					load_result.texture->drop();
@@ -454,7 +479,17 @@ index aed71e8..5d71354 100644
  					if(chk)
  						*chk = 1;
  				} else {
-@@ -738,6 +800,10 @@ irr::video::ITexture* ImageManager::GetTextureCard(uint32_t code, imgType type,
+ 					rmap = nullptr;
+ 					if(chk)
+ 						*chk = 0;
++#ifdef __EMSCRIPTEN__
++					/* [web] 비동기 다운로드가 아직 안 끝났을 수 있다 -> 다음 프레임에 다시 시도 */
++					elem.preload_status = preloadStatus::NONE;
++#endif
+ 				}
+ 				return (rmap) ? rmap : ret_unk;
+ 			} else {
+@@ -738,6 +812,10 @@ irr::video::ITexture* ImageManager::GetTextureCard(uint32_t code, imgType type,
  irr::video::ITexture* ImageManager::GetTextureField(uint32_t code) {
  	if(code == 0)
  		return nullptr;
