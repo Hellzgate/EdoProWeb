@@ -80,6 +80,26 @@ index df84151..aad96a3 100644
  }
  DataHandler::~DataHandler() {
  	if(filesystem)
+diff --git a/gframe/drawing.cpp b/gframe/drawing.cpp
+index 918406c..4c55e82 100644
+--- a/gframe/drawing.cpp
++++ b/gframe/drawing.cpp
+@@ -1255,6 +1255,15 @@ void Game::DrawDeckBd() {
+ 		return epro::to_wstring(deck.size());
+ 	};
+ 	const auto& current_deck = deckBuilder.GetCurrentDeck();
++#ifdef __EMSCRIPTEN__
++	/* [web] 40~55장을 한 화면에 그리므로 미리 받아둔다(없으면 그리는 순간 동기 다운로드로 끊긴다) */
++	for(const auto& card : current_deck.main)
++		imageManager.PrefetchCard(card->code);
++	for(const auto& card : current_deck.extra)
++		imageManager.PrefetchCard(card->code);
++	for(const auto& card : current_deck.side)
++		imageManager.PrefetchCard(card->code);
++#endif
+ 
+ 	//main deck
+ 	{
 diff --git a/gframe/duelclient.cpp b/gframe/duelclient.cpp
 index 05b5092..b7fa906 100644
 --- a/gframe/duelclient.cpp
@@ -352,10 +372,10 @@ index 4eae2f8..c52426f 100644
  void ImageDownloader::AddDownloadResource(PicSource src) {
  	pic_urls.push_back(src);
 diff --git a/gframe/image_manager.cpp b/gframe/image_manager.cpp
-index aed71e8..d15b973 100644
+index aed71e8..d41eb22 100644
 --- a/gframe/image_manager.cpp
 +++ b/gframe/image_manager.cpp
-@@ -44,15 +44,70 @@ irr::s32 toPow2(irr::video::IVideoDriver* driver, irr::s32 size) {
+@@ -44,15 +44,108 @@ irr::s32 toPow2(irr::video::IVideoDriver* driver, irr::s32 size) {
  }
  }
  
@@ -396,6 +416,44 @@ index aed71e8..d15b973 100644
 +	}, code, type);
 +}
 +
++
++/* [web] 썸네일 **선반입**(비동기). 렌더 경로는 동기 fetch 를 그대로 쓰되,
++   덱 편집기처럼 한 번에 여러 장을 그리는 화면은 미리 받아 두어 히치를 없앤다. */
++EM_JS(int, web_pic_exists, (int code, int type), {
++	try {
++		var dir = (type === 1) ? '/pics/field/' : ((type === 2) ? '/pics/cover/' : '/pics/');
++		FS.stat(dir + code + '.jpg');
++		return 1;
++	} catch (e) { return 0; }
++});
++
++EM_JS(void, web_pic_start, (int code, int type), {
++	try {
++		var dir = (type === 1) ? '/pics/field/' : ((type === 2) ? '/pics/cover/' : '/pics/');
++		var path = dir + code + '.jpg';
++		var url = (type === 1) ? ('/img/field/' + code + '.jpg')
++		        : ((type === 2) ? ('/img/cover/' + code + '.jpg') : ('/img/' + code + '.jpg'));
++		try { FS.mkdirTree(dir); } catch (e) {}
++		fetch(url, { cache: 'force-cache' }).then(function (r) {
++			if (!r.ok) throw new Error('http ' + r.status);
++			return r.arrayBuffer();
++		}).then(function (buf) {
++			if (!buf || buf.byteLength < 800) throw new Error('short');
++			FS.writeFile(path, new Uint8Array(buf));
++		}).catch(function () {});
++	} catch (e) {}
++});
++
++/* 덱 썸네일 선반입: 같은 카드는 한 번만 요청 */
++void ImageManager::PrefetchCard(uint32_t code) {
++	static std::set<uint32_t> asked;
++	if(code == 0 || !asked.insert(code).second)
++		return;
++	if(web_pic_exists((int)code, 0))
++		return;
++	web_pic_start((int)code, 0);
++}
++
 +static bool WebFetchCardImage(uint32_t code, int type) {
 +	static std::set<uint32_t> done[3];
 +	int idx = (type == 1) ? 1 : ((type == 2) ? 2 : 0);
@@ -426,7 +484,7 @@ index aed71e8..d15b973 100644
  	obj_clear_lock.lock();
  	cv_clear.notify_all();
  	obj_clear_lock.unlock();
-@@ -62,6 +117,7 @@ ImageManager::~ImageManager() {
+@@ -62,6 +155,7 @@ ImageManager::~ImageManager() {
  	pic_load.unlock();
  	for(auto& thread : load_threads)
  		thread.join();
@@ -434,7 +492,7 @@ index aed71e8..d15b973 100644
  	for(auto& it : g_imgCache) {
  		if(it.second)
  			it.second->drop();
-@@ -685,23 +741,34 @@ irr::video::ITexture* ImageManager::GetTextureCard(uint32_t code, imgType type,
+@@ -685,23 +779,34 @@ irr::video::ITexture* ImageManager::GetTextureCard(uint32_t code, imgType type,
  	}();
  	if(code == 0)
  		return ret_unk;
@@ -469,7 +527,7 @@ index aed71e8..d15b973 100644
  		if(chk)
  			*chk = 2;
  		if(elem.preload_status == preloadStatus::NONE || (elem.preload_status == preloadStatus::WAIT_DOWNLOAD && status == ImageDownloader::downloadStatus::DOWNLOADED)) {
-@@ -712,12 +779,19 @@ irr::video::ITexture* ImageManager::GetTextureCard(uint32_t code, imgType type,
+@@ -712,12 +817,19 @@ irr::video::ITexture* ImageManager::GetTextureCard(uint32_t code, imgType type,
  				if(load_result.status == loadStatus::LOAD_OK) {
  					rmap = driver->addTexture(load_result.path.data(), load_result.texture);
  					load_result.texture->drop();
@@ -489,7 +547,7 @@ index aed71e8..d15b973 100644
  				}
  				return (rmap) ? rmap : ret_unk;
  			} else {
-@@ -738,6 +812,10 @@ irr::video::ITexture* ImageManager::GetTextureCard(uint32_t code, imgType type,
+@@ -738,6 +850,10 @@ irr::video::ITexture* ImageManager::GetTextureCard(uint32_t code, imgType type,
  irr::video::ITexture* ImageManager::GetTextureField(uint32_t code) {
  	if(code == 0)
  		return nullptr;
@@ -500,6 +558,19 @@ index aed71e8..d15b973 100644
  	auto tit = tFields.find(code);
  	if(tit != tFields.end())
  		return tit->second;
+diff --git a/gframe/image_manager.h b/gframe/image_manager.h
+index fad467a..d032132 100644
+--- a/gframe/image_manager.h
++++ b/gframe/image_manager.h
+@@ -93,6 +93,8 @@ public:
+ 	irr::video::ITexture* GetTextureFromFile(const irr::io::path& file, int width, int height);
+ 	irr::video::ITexture* GetTextureCard(uint32_t code, imgType type, bool wait = false, bool fit = false, int* chk = nullptr);
+ 	irr::video::ITexture* GetTextureField(uint32_t code);
++	/* [web] 썸네일 선반입(비동기). 다른 플랫폼에서는 no-op */
++	void PrefetchCard(uint32_t code);
+ 	irr::video::ITexture* GetCheckboxScaledTexture(float scale);
+ 	irr::video::ITexture* guiScalingResizeCached(irr::video::ITexture* src, const irr::core::rect<irr::s32>& srcrect,
+ 												 const irr::core::rect<irr::s32> &destrect);
 diff --git a/gframe/menu_handler.cpp b/gframe/menu_handler.cpp
 index 7b3360f..5c7c900 100644
 --- a/gframe/menu_handler.cpp

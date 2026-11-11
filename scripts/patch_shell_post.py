@@ -31,6 +31,8 @@ CSS = (
     "background:rgba(0,0,0,.55);color:#fff;font:20px 'Malgun Gothic',sans-serif;"
     "align-items:center;justify-content:center;text-align:center}"
     "#edopro-drop.on{display:flex!important}"
+    "#edopro-hint{display:none!important;position:fixed;left:0;right:0;bottom:10px;text-align:center;color:#8b93a1;font:12px sans-serif;z-index:99997;pointer-events:none}"
+    "#edopro-hint.on{display:block!important}"
     "</style>"
 )
 
@@ -62,6 +64,14 @@ window.addEventListener('unhandledrejection', function (e) {
       c.style.width = w + 'px';
       c.style.height = h + 'px';
     }
+    var hintEl = document.getElementById('edopro-hint');
+    if (!hintEl) {
+      hintEl = document.createElement('div');
+      hintEl.id = 'edopro-hint';
+      hintEl.textContent = '\uAC00\uB85C\uB85C \uB3CC\uB9AC\uBA74 \uB354 \uD06C\uAC8C \uBCF4\uC785\uB2C8\uB2E4';
+      document.body.appendChild(hintEl);
+    }
+    hintEl.className = (H > W * 1.15) ? 'on' : '';
   }
   window.__edoproFit = fit;
   window.addEventListener('resize', fit);
