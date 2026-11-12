@@ -401,7 +401,69 @@ window.addEventListener('unhandledrejection', function (e) {
     setTimeout(function () {
       try { startSaver(); } catch (e) { console.log('[userdata] saver fail: ' + e); }
     }, 2500);
+    setTimeout(function () {
+      try { loadBgmIfEnabled(); } catch (e) { console.log('[bgm] fail: ' + e); }
+    }, 4000);
   });
+
+  /* BGM 은 .data 에 넣지 않는다(16MB) — `enable_music = 1` 일 때만 내려받아 FS 에 넣고
+     게임(실행기)에 목록 새로고침을 요청한다(edopro_refresh_bgm). */
+  function loadBgmIfEnabled() {
+    var enabled = false;
+    try {
+      var sc = FS.readFile('/config/system.conf', { encoding: 'utf8' });
+      enabled = /^\s*enable_music\s*=\s*1\s*$/m.test(sc || '');
+    } catch (e) { enabled = false; }
+    if (!enabled) { console.log('[bgm] enable_music=0 → 건너뜀(16MB 절약)'); return; }
+    if (window.__bgmLoading) return;
+    window.__bgmLoading = true;
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/bgm', true);
+    xhr.onload = function () {
+      if (xhr.status !== 200) { console.log('[bgm] list ' + xhr.status); return; }
+      var list = [];
+      try { list = (JSON.parse(xhr.responseText).files) || []; } catch (e) {}
+      if (!list.length) { console.log('[bgm] 목록 없음'); return; }
+      var total = 0, done = 0, ok = 0;
+      for (var i = 0; i < list.length; i++) total += list[i].size;
+      var idx = 0, active = 0, MAX = 3;
+      function next() {
+        if (idx >= list.length) {
+          if (done >= list.length) finish();
+          return;
+        }
+        var it = list[idx++];
+        active++;
+        var r = new XMLHttpRequest();
+        r.open('GET', '/api/bgm/' + it.p, true);
+        r.responseType = 'arraybuffer';
+        r.onload = function () {
+          if (r.status === 200) {
+            try {
+              var dst = '/sound/BGM/' + it.p;
+              FS.mkdirTree(dst.substring(0, dst.lastIndexOf('/')));
+              FS.writeFile(dst, new Uint8Array(r.response));
+              ok++;
+            } catch (e) { console.log('[bgm] write ' + it.p + ': ' + e); }
+          }
+          active--; done++; next();
+        };
+        r.onerror = function () { active--; done++; next(); };
+        r.send();
+      }
+      function finish() {
+        console.log('[bgm] applied ' + ok + '/' + list.length + ' files (' + (total / 1048576).toFixed(1) + 'MB)');
+        try {
+          if (Module._edopro_refresh_bgm) Module._edopro_refresh_bgm();
+          else if (Module.ccall) Module.ccall('edopro_refresh_bgm', 'void', [], []);
+          if (window.__edoproToast) window.__edoproToast('BGM ' + ok + '곡을 불러왔습니다', 1600);
+        } catch (e) { console.log('[bgm] refresh fail: ' + e); }
+      }
+      for (var k = 0; k < MAX; k++) next();
+    };
+    xhr.onerror = function () { console.log('[bgm] list error'); };
+    xhr.send();
+  }
 
   /* 부팅 완료 후 주기 저장 시작 */
   function startSaver() {

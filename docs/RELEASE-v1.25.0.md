@@ -1,7 +1,7 @@
-# EDOPro Web — v1.24.4 릴리스 노트
+# EDOPro Web — v1.25.0 릴리스 노트
 
 - 날짜: 2026-11-13
-- 이미지: `edopro-web:1.24.4`
+- 이미지: `edopro-web:1.25.0`
 - 접속: `https://sw20103.synology.me:8451/` (DSM 역프록시) · LAN `https://192.168.0.53:8443`
 - 원본: Project Ignis EDOPro 41.0.2 (wasm)
 
@@ -9,8 +9,9 @@
 
 | 항목 | 결과 |
 |---|---|
-| **부팅 전송량** | **81.3MB → 60.3MB (-25.8%)** (HTTPS 실측) |
+| **부팅 전송량** | **81.3MB → 45.6MB (-43.9%)** (HTTPS 실측) |
 | 폰트 | NotoSansKR 16.4MB → **1.7MB** (서브셋) |
+| BGM | 16MB **지연 로딩**(`enable_music=1` 일 때만) |
 | 압축 | brotli: wasm 13.3→**8.9MB**, data 52.6→**45.0MB**, 번들 11.3→**6.1MB** |
 | 언어 | `system.conf language` 하나로 **UI 6개 언어 + 카드DB** 동시 전환 |
 | 스크린샷 | 📷 버튼 → PNG 다운로드(원본 '스크린샷' 대응) |
@@ -25,8 +26,9 @@
 | `edopro-full.wasm` | 14.0MB | **8.9MB** |
 | `edopro-full.js` | 0.3MB | 0.3MB |
 | `/api/repos/bundle` (한국어) | 11.9MB | **6.1MB** |
+| `edopro-full.data` (BGM 제외 후) | 67.4MB | **30.3MB** |
 
-- `.data` 113,129,788B (폰트 서브셋으로 -14.7MB).
+- `.data` **97,029,810B** (폰트 서브셋 -14.7MB + BGM 지연 -16MB).
 - ⚠ 평문 HTTP 에서는 Chrome 이 `br` 을 보내지 않아 gzip(77.5MB)이다. **HTTPS 로 접속해야 최대 절감**.
 
 ## 2. 언어 연동 (정정)

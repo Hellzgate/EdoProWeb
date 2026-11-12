@@ -128,6 +128,7 @@ KOREAN_CDB = os.environ.get("KOREAN_CDB", "/app/lang/korean/cards.cdb")
 ENG_STRINGS = os.environ.get("ENG_STRINGS", "/app/lang/english/strings.conf")
 MISS_TTL = int(os.environ.get("PIC_MISS_TTL", str(24 * 3600)))   # 이미지 404 캐시(초)
 LOCAL_PICS = os.environ.get("LOCAL_PICS", "/app/localpics")   # 사용자 EDOPro pics 오버레이(ro)
+BGM_DIR = os.environ.get("BGM_DIR", "/app/sound-bgm")         # BGM 지연 로딩 원본(부팅 .data 에서 제외)
 
 PIC_UPSTREAM = [
     "https://images.ygoprodeck.com/images/cards/{}",
@@ -1008,6 +1009,41 @@ async def handle(reader, writer):
             writer.close()
             return
 
+
+        # ---- BGM 지연 로딩 (부팅 .data 16MB 절감, enable_music=1 일 때만 셸이 받아간다) ----
+        if path == "/api/bgm":
+            files = []
+            try:
+                for scene in sorted(os.listdir(BGM_DIR)):
+                    d = os.path.join(BGM_DIR, scene)
+                    if not os.path.isdir(d):
+                        continue
+                    for name in sorted(os.listdir(d)):
+                        f = os.path.join(d, name)
+                        if os.path.isfile(f):
+                            files.append({"p": scene + "/" + name, "size": os.path.getsize(f)})
+            except OSError as e:
+                log("bgm list fail: %s" % e)
+            body = json.dumps({"files": files, "count": len(files)}, ensure_ascii=False).encode()
+            writer.write(resp(200, "OK", body, "application/json; charset=utf-8",
+                              "Cache-Control: no-cache\r\n"))
+            await writer.drain()
+            writer.close()
+            return
+        if path.startswith("/api/bgm/"):
+            rel = urllib.parse.unquote(path[len("/api/bgm/"):])
+            full = os.path.normpath(os.path.join(BGM_DIR, rel))
+            if ".." in rel or not full.startswith(os.path.abspath(BGM_DIR)) or not os.path.isfile(full):
+                writer.write(resp(404, "Not Found", b"404", "text/plain; charset=utf-8"))
+                await writer.drain()
+                writer.close()
+                return
+            data = open(full, "rb").read()
+            writer.write(resp(200, "OK", data, "audio/mpeg",
+                              "Cache-Control: max-age=86400\r\n"))
+            await writer.drain()
+            writer.close()
+            return
 
         # ---- 저장소 번들(자동 업데이트 반영) ----
         if path == "/api/repos/bundle":

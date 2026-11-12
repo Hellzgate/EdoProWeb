@@ -1,7 +1,7 @@
 # EDOPro Web — 아키텍처 / 모듈 지도
 
-- 버전: **1.24.4** (이미지 `edopro-web:1.24.4`)
-- 전송: `.br`(brotli) 우선 → 부팅 **60.3MB**(이전 81.3MB)
+- 버전: **1.25.0** (이미지 `edopro-web:1.25.0`)
+- 전송: `.br`(brotli) 우선 + BGM 지연 → 부팅 **45.6MB**(이전 81.3MB)
 - 구성: **브라우저(wasm) + 정적·중계 서버(Python asyncio) + DSM HTTPS 역프록시**
 - 원본: Project Ignis EDOPro 41.0.2 (gframe + irrlicht + ocgcore) / SDL2 2.32.10 / emscripten
 
@@ -55,6 +55,7 @@
 | M2 | **정적 파일** | `.br` → `.gz` → 원본 선택, Range 지원, COOP/COEP 헤더 | `/`, `/edopro-full.*`, `*.html` |
 | M3 | **이미지** | `_safe_pic()`, `fetch_image()` (디스크 캐시) | `/img/<id>.jpg`, `/img/field/…`, `/img/cover/…` |
 | M4 | **사용자 데이터** | `load_userdata()`, `save_userdata()`, `_ud_read_file()`, `_ud_write_file()`, `_file_kind()`, `render_files_page()` | `/api/userdata`, `/api/userdata/file`, `/files.html` |
+| M5b | **BGM(지연)** | `/api/bgm`(목록) · `/api/bgm/<scene>/<file>` — `sound-bgm/` 16MB, `enable_music=1` 일 때만 셸이 받는다 | `/api/bgm*` |
 | M5 | **저장소(git)** | `sync_repo()`, `list_repos()`, `build_repo_bundle()`, `make_tar()`, `auto_sync_repos()`, `repo_bundle_summary()` | `/api/repos`, `/api/repos/sync`, `/api/repos.tar`, `/api/repos/bundle` |
 | M6 | **WS 브리지** | `ws_frame()`, `read_ws_frame()`, `ws_bridge()`, `_valid_host()` | `/ws` |
 | M7 | **로비/봇** | `fetch_lobby_rooms()`, `_bot_request()` | `/api/getrooms`, `/api/bot/*` |
