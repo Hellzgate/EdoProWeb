@@ -17,8 +17,9 @@ v1.13.0: 회전(orientation) 시 화면이 작아지던 문제 해결 — dpr �
 ## 수정
 1. **dpr 정규화** — `<head>` 직후에서 `window.devicePixelRatio` 를 1로 고정해
    SDL 과 셸이 같은 값을 보게 한다(핵심).
-2. **2x 렌더 + transform** — 캔버스 CSS 크기를 표시 크기의 `SS=min(2,실제dpr)` 배로 잡고
-   `transform: scale(1/SS)` 로 맞춘다. 폰은 2배 해상도로 렌더 → 글자가 선명.
+2. **2x CSS + transform** — 캔버스 CSS 크기를 표시 크기의 `SS=min(2,실제dpr)` 배로 잡고
+   `transform: scale(1/SS)` 로 맞춘다. 실측상 SDL 이 버퍼를 절반(표시 크기)으로 다시 잡으므로
+   실효 해상도는 표시 크기와 동일하다.
 3. **irrlicht 패치** — `SDL_WINDOWEVENT_RESIZED` 를 `SIZE_CHANGED` 와 동일 처리(안전장치).
 4. **진단 페이지 `/view.html`** — 게임 페이지가 `localStorage` 에
    `뷰포트/dpr/CSS/표시크기/버퍼` 이력을 남긴다(최근 12건).
