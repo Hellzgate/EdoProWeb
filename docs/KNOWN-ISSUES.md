@@ -306,3 +306,11 @@ curl -s -o /dev/null -w "%{http_code} %{size_download}\n" http://192.168.0.53:75
 #    봇 투입: POST http://192.168.0.4:8090/api/bot/start  {"roomId":N,"deck":"raisemoon"}
 ```
 
+---
+
+## 덱 편집 카드 아트 로딩이 느림 (v1.25.5, 미해결)
+
+- 70장 덱에서 그림이 **30~45초**에 걸쳐 채워진다(처음엔 뒷면/검정).
+- 원인: `image_manager.cpp` 의 동기 XHR + 16ms 당 2장 예산(`web_fetch_pic`).
+- 선반입 우선 패치는 **전부 뒷면**이 되는 부작용으로 되돌렸다(§18-6).
+- 서버 `/img/<id>.jpg` 는 정상(디스크 캐시, 200). 게임 쪽 로딩 경로 문제다.
