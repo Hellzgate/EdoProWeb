@@ -35,13 +35,13 @@ CSS = (
     "#edopro-hint.on{display:block!important}"
     "#edopro-start{display:flex!important;position:fixed!important;inset:0;z-index:100002;"
     "background:rgba(6,7,9,.92);align-items:center;justify-content:center;text-align:center;"
-    "font:15px/1.5 'Malgun Gothic',sans-serif;color:#e8eaf0}"
-    "#edopro-start .panel{max-width:min(560px,86vw)}"
-    "#edopro-start .t{font-size:19px;font-weight:600;margin-bottom:16px}"
-    "#edopro-start .s{font-size:12px;color:#98a3b6;margin-top:12px}"
-    "#edopro-start .k{margin-top:14px}"
-    "#edopro-start .k a{color:#98a3b6;font-size:13px}"
-    "#edopro-start button{font:600 17px 'Malgun Gothic',sans-serif;padding:14px 22px;border-radius:10px;"
+    "font:20px/1.5 'Malgun Gothic',sans-serif;color:#e8eaf0}"
+    "#edopro-start .panel{max-width:min(760px,88vw)}"
+    "#edopro-start .t{font-size:30px;font-weight:700;margin-bottom:22px}"
+    "#edopro-start .s{font-size:18px;color:#98a3b6;margin-top:16px}"
+    "#edopro-start .k{margin-top:18px}"
+    "#edopro-start .k a{color:#98a3b6;font-size:20px}"
+    "#edopro-start button{font:700 26px 'Malgun Gothic',sans-serif;padding:20px 34px;border-radius:12px;"
     "border:1px solid #3f6fd8;background:linear-gradient(180deg,#3b72e0,#2a55b0);color:#fff;cursor:pointer}"
     "#edopro-start button:active{filter:brightness(1.15)}"
     "#edopro-fs{display:block!important;position:fixed!important;right:10px;top:10px;"
@@ -822,8 +822,10 @@ FS = r"""
 FS2 = r"""
 <script>
 /*fs-start*/
-/* 로딩 시 1탭으로 전체화면+가로 고정 (브라우저는 제스처 없이 전체화면을 허용하지 않는다) */
+/* 로딩 시 1탭으로 전체화면+가로 고정 (브라우저는 제스처 없이 전체화면을 허용하지 않는다)
+   · 가로에서만 표시(세로는 회전 안내) · 배경 탭 또는 12초 뒤 자동 해제 */
 (function () {
+  var dismissed = false;
   function enterFs(cb) {
     var el = document.documentElement;
     try {
@@ -836,9 +838,16 @@ FS2 = r"""
   function lockOrient() {
     try { if (screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(function () {}); } catch (e) {}
   }
+  function close(d) {
+    dismissed = true;
+    if (d && d.parentNode) d.parentNode.removeChild(d);
+    setTimeout(function () { if (window.__edoproFit) window.__edoproFit(); }, 300);
+  }
   function build() {
+    if (dismissed) return;
     if (document.getElementById('edopro-start')) return;
     if (document.fullscreenElement) return;
+    if (window.innerWidth <= window.innerHeight) return;   /* 세로에서는 표시하지 않음 */
     var d = document.createElement('div');
     d.id = 'edopro-start';
     d.innerHTML =
@@ -849,20 +858,22 @@ FS2 = r"""
       '<div class="k"><a href="#" id="edopro-start-skip">\uADF8\uB0E5 \uC2DC\uC791</a></div>' +
       '</div>';
     document.body.appendChild(d);
+    d.addEventListener('click', function (ev) { if (ev.target === d) { ev.preventDefault(); close(d); } });
     document.getElementById('edopro-start-btn').addEventListener('click', function (ev) {
       ev.preventDefault(); ev.stopPropagation();
-      enterFs(function () {
-        lockOrient();
-        if (d.parentNode) d.parentNode.removeChild(d);
-        setTimeout(function () { if (window.__edoproFit) window.__edoproFit(); }, 400);
-      });
+      close(d);
+      try { enterFs(function () { lockOrient(); }); } catch (e) {}
+      try { lockOrient(); } catch (e) {}
     });
     document.getElementById('edopro-start-skip').addEventListener('click', function (ev) {
       ev.preventDefault(); ev.stopPropagation();
-      if (d.parentNode) d.parentNode.removeChild(d);
+      close(d);
     });
+    setTimeout(function () { if (d.parentNode) close(d); }, 12000);
   }
   if (document.body) build(); else document.addEventListener('DOMContentLoaded', build);
+  window.addEventListener('orientationchange', function () { setTimeout(build, 700); });
+  window.addEventListener('resize', function () { setTimeout(build, 700); });
 })();
 </script>
 """
