@@ -33,6 +33,22 @@ CSS = (
     "#edopro-drop.on{display:flex!important}"
     "#edopro-hint{display:none!important;position:fixed;left:0;right:0;bottom:10px;text-align:center;color:#8b93a1;font:12px sans-serif;z-index:99997;pointer-events:none}"
     "#edopro-hint.on{display:block!important}"
+    "#edopro-start{display:flex!important;position:fixed!important;inset:0;z-index:100002;"
+    "background:rgba(6,7,9,.92);align-items:center;justify-content:center;text-align:center;"
+    "font:15px/1.5 'Malgun Gothic',sans-serif;color:#e8eaf0}"
+    "#edopro-start .panel{max-width:min(560px,86vw)}"
+    "#edopro-start .t{font-size:19px;font-weight:600;margin-bottom:16px}"
+    "#edopro-start .s{font-size:12px;color:#98a3b6;margin-top:12px}"
+    "#edopro-start .k{margin-top:14px}"
+    "#edopro-start .k a{color:#98a3b6;font-size:13px}"
+    "#edopro-start button{font:600 17px 'Malgun Gothic',sans-serif;padding:14px 22px;border-radius:10px;"
+    "border:1px solid #3f6fd8;background:linear-gradient(180deg,#3b72e0,#2a55b0);color:#fff;cursor:pointer}"
+    "#edopro-start button:active{filter:brightness(1.15)}"
+    "#edopro-fs{display:block!important;position:fixed!important;right:10px;top:10px;"
+    "width:44px;height:44px;border-radius:22px;border:1px solid rgba(255,255,255,.35);"
+    "background:rgba(20,22,28,.55);color:#e8eaf0;font:20px/1 sans-serif;padding:0;"
+    "z-index:100000;cursor:pointer}"
+    "#edopro-fs:active{background:rgba(80,140,255,.65)}"
     "#edopro-diag{display:none!important;position:fixed;left:6px;top:6px;max-width:92vw;"
     "background:rgba(0,0,0,.78);color:#9fe3a0;font:11px/1.45 monospace;padding:6px 8px;"
     "border-radius:6px;z-index:99999;white-space:pre-wrap}"
@@ -724,6 +740,8 @@ def _strip_injected(html):
     html = _re.sub(r"<style>\s*#edopro-load\{.*?</script>", "", html, flags=_re.S)
     html = _re.sub(r"<script>\s*/\* \?diag=1 이면.*?</script>", "", html, flags=_re.S)
     html = _re.sub(r"<script>/\*dpr1\*/.*?</script>", "", html, flags=_re.S)
+    html = _re.sub(r"<script>\s*/\*fs-btn\*/.*?</script>", "", html, flags=_re.S)
+    html = _re.sub(r"<script>\s*/\*fs-start\*/.*?</script>", "", html, flags=_re.S)
     html = _re.sub(r"<link[^>]*>\s*", "", html, count=0) if False else html
     return html
 
@@ -746,7 +764,11 @@ if start != -1:
     if end != -1:
         s = s[:start] + s[end + len("</script>"):]
 
-META = '<meta name="viewport" content="width=1280, user-scalable=no">'
+META = ('<meta name="viewport" content="width=1280, user-scalable=no">'
+        '<meta name="mobile-web-app-capable" content="yes">'
+        '<meta name="apple-mobile-web-app-capable" content="yes">'
+        '<meta name="theme-color" content="#000000">'
+        '<link rel="manifest" href="/manifest.json">')
 if 'name="viewport"' not in s:
     s = s.replace("</head>", META + "</head>", 1)
 else:
@@ -763,12 +785,98 @@ EARLY = (
 if '/*dpr1*/' not in s:
     s = s.replace("<head>", "<head>" + EARLY, 1)
 
-    s = s.replace("<head>", "<head>" + EARLY, 1)
+FS = r"""
+<script>
+/*fs-btn*/
+/* 전체화면 버튼: 모바일 브라우저의 주소창/툴바를 숨긴다(가로 고정 시도 포함) */
+(function () {
+  function mk() {
+    if (document.getElementById('edopro-fs')) return;
+    var b = document.createElement('button');
+    b.id = 'edopro-fs';
+    b.type = 'button';
+    b.title = '\uC804\uCCB4\uD654\uBA74';
+    b.textContent = '\u26F6';
+    b.addEventListener('click', function (ev) {
+      ev.preventDefault(); ev.stopPropagation();
+      var el = document.documentElement;
+      try {
+        var p = el.requestFullscreen ? el.requestFullscreen()
+              : (el.webkitRequestFullscreen ? el.webkitRequestFullscreen() : null);
+        if (p && p.catch) p.catch(function () {});
+      } catch (e) {}
+      try { if (screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(function () {}); } catch (e) {}
+      setTimeout(function () { if (window.__edoproFit) window.__edoproFit(); }, 400);
+    });
+    document.body.appendChild(b);
+    document.addEventListener('fullscreenchange', function () {
+      b.textContent = document.fullscreenElement ? '\u2715' : '\u26F6';
+      setTimeout(function () { if (window.__edoproFit) window.__edoproFit(); }, 300);
+    });
+  }
+  if (document.body) mk(); else document.addEventListener('DOMContentLoaded', mk);
+})();
+</script>
+"""
+
+FS2 = r"""
+<script>
+/*fs-start*/
+/* 로딩 시 1탭으로 전체화면+가로 고정 (브라우저는 제스처 없이 전체화면을 허용하지 않는다) */
+(function () {
+  function enterFs(cb) {
+    var el = document.documentElement;
+    try {
+      var p = el.requestFullscreen ? el.requestFullscreen()
+            : (el.webkitRequestFullscreen ? el.webkitRequestFullscreen() : null);
+      if (p && p.then) { p.then(function () { cb(); }).catch(function () { cb(); }); return; }
+    } catch (e) {}
+    try { cb(); } catch (e) {}
+  }
+  function lockOrient() {
+    try { if (screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(function () {}); } catch (e) {}
+  }
+  function build() {
+    if (document.getElementById('edopro-start')) return;
+    if (document.fullscreenElement) return;
+    var d = document.createElement('div');
+    d.id = 'edopro-start';
+    d.innerHTML =
+      '<div class="panel">' +
+      '<div class="t">\uD654\uBA74\uC744 \uAC00\uB4DD \uCC44\uC6CC \uC2DC\uC791\uD569\uB2C8\uB2E4</div>' +
+      '<button type="button" id="edopro-start-btn">\uC804\uCCB4\uD654\uBA74\uC73C\uB85C \uC2DC\uC791 (\uAC00\uB85C)</button>' +
+      '<div class="s">\uBE0C\uB77C\uC6B0\uC800 \uADDC\uCE59\uC0C1 \uC804\uCCB4\uD654\uBA74\uC740 \uD55C \uBC88 \uB204\uB974\uC57C \uCF1C\uC9D1\uB2C8\uB2E4.</div>' +
+      '<div class="k"><a href="#" id="edopro-start-skip">\uADF8\uB0E5 \uC2DC\uC791</a></div>' +
+      '</div>';
+    document.body.appendChild(d);
+    document.getElementById('edopro-start-btn').addEventListener('click', function (ev) {
+      ev.preventDefault(); ev.stopPropagation();
+      enterFs(function () {
+        lockOrient();
+        if (d.parentNode) d.parentNode.removeChild(d);
+        setTimeout(function () { if (window.__edoproFit) window.__edoproFit(); }, 400);
+      });
+    });
+    document.getElementById('edopro-start-skip').addEventListener('click', function (ev) {
+      ev.preventDefault(); ev.stopPropagation();
+      if (d.parentNode) d.parentNode.removeChild(d);
+    });
+  }
+  if (document.body) build(); else document.addEventListener('DOMContentLoaded', build);
+})();
+</script>
+"""
 
 if "</body>" in s:
     s = s.replace("</body>", BOOT + "</body>", 1)
 else:
     s += BOOT
+
+if '/*fs-btn*/' not in s:
+    s = s.replace("</body>", FS + "</body>", 1)
+
+if '/*fs-start*/' not in s:
+    s = s.replace("</body>", FS2 + "</body>", 1)
 
 s = s.replace("</head>", EDOPRO_JLOG + "</head>", 1)
 s = s.replace("<body>", "<body>" + EDOPRO_LOAD, 1)
