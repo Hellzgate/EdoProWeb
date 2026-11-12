@@ -4,6 +4,7 @@ RUN apk add --no-cache git ca-certificates
 
 WORKDIR /app
 COPY server.py /app/server.py
+COPY cert/ /app/cert/
 COPY web/edopro-full.html /app/web/edopro-full.html
 COPY web/edopro-full.js /app/web/edopro-full.js
 COPY web/edopro-full.wasm /app/web/edopro-full.wasm
@@ -20,7 +21,7 @@ ENV PORT=8080 \
     REPO_ROOT=/app/repos \
     REPOS=ProjectIgnis/BabelCDB
 
-EXPOSE 8080
+EXPOSE 8080 8443
 CMD ["python3", "-u", "/app/server.py"]
 
 # 초기 전송량 감축: 큰 정적 파일을 미리 압축해 둔다(서버가 Accept-Encoding: gzip 일 때 .gz 를 보낸다)

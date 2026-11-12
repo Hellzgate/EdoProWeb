@@ -92,13 +92,24 @@ EDOPRO_JLOG = r"""
 (function () {
   var sent = 0;
   var DEBUG_LOG = location.search.indexOf('debug') >= 0;
+  var NETLOG = location.search.indexOf('net=1') >= 0;
   var SYNC_LOG = location.search.indexOf('jlogsync') >= 0;
-  var NOLOG = location.search.indexOf('nolog') >= 0;
   function send(m) {
-    if (NOLOG) return;
     if (sent > 4000) return;
     var s0 = String(m);
-    try { localStorage.setItem('edopro-last', s0.slice(0, 300)); localStorage.setItem('edopro-last-at', String(Date.now())); } catch (e) {}
+    /* 항상 localStorage 에 마지막 로그를 남긴다(크래시 후 /last.html 로 확인). */
+    try {
+      localStorage.setItem('edopro-last', s0.slice(0, 300));
+      localStorage.setItem('edopro-last-at', String(Date.now()));
+      /* 최근 40건 링 버퍼 — 크래시 지점 추적용 */
+      var hist = [];
+      try { hist = JSON.parse(localStorage.getItem('edopro-hist') || '[]'); } catch (e2) { hist = []; }
+      hist.push(s0.slice(0, 200));
+      if (hist.length > 40) hist = hist.slice(hist.length - 40);
+      localStorage.setItem('edopro-hist', JSON.stringify(hist));
+    } catch (e) {}
+    /* 네트워크 로깅은 명시적으로 켤 때만 (?net=1 or ?jlogsync=1) — 기본 OFF */
+    if (!NETLOG && !SYNC_LOG) return;
     if (!DEBUG_LOG) {
       if (s0.indexOf('[flow]') >= 0 || s0.indexOf('[step]') >= 0) return;
     }

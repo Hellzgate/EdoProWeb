@@ -3,26 +3,41 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>last log</title>
 <style>
-html,body{margin:0;background:#0d0f13;color:#e6e6e6;font:16px/1.6 monospace}
-#out{padding:14px;white-space:pre-wrap;word-break:break-all}
-b{color:#7fd4ff}
+html,body{margin:0;background:#0d0f13;color:#e6e6e6;font:14px/1.5 monospace}
+#out{padding:10px;white-space:pre-wrap;word-break:break-all}
 </style>
 <pre id="out">읽는 중…</pre>
 <script>
 (function () {
   var out = document.getElementById('out');
+  var qs = location.search;
+
+  if (qs.indexOf('clear') >= 0) {
+    try { localStorage.removeItem('edopro-hist'); localStorage.removeItem('edopro-last'); localStorage.removeItem('edopro-last-at'); } catch (e) {}
+    out.textContent = '이력 초기화 완료.\n이제 게임 페이지를 열어 주세요.';
+    return;
+  }
+
   function show() {
-    var m = null, at = null;
-    try { m = localStorage.getItem('edopro-last'); at = localStorage.getItem('edopro-last-at'); } catch (e) {}
+    var hist = [], at = null;
+    try {
+      hist = JSON.parse(localStorage.getItem('edopro-hist') || '[]');
+      at = localStorage.getItem('edopro-last-at');
+    } catch (e) {}
     var t = '';
     if (at) { try { t = new Date(Number(at)).toLocaleTimeString(); } catch (e) {} }
-    out.textContent =
-      '마지막 로그: ' + (m || '(없음)') + '\n' +
-      '시각: ' + (t || '-') + '\n' +
-      '\n[ 새로고침 ] 로 다시 읽습니다.';
+
+    var lines = ['총 ' + hist.length + '건   마지막 ' + (t || '-')];
+    if (hist.length > 0) {
+      lines.push('--- 가장 오래된 2건 ---');
+      for (var a = 0; a < Math.min(2, hist.length); a++) lines.push('[' + (a + 1) + '] ' + hist[a]);
+      lines.push('=== 최신순 (25) ===');
+      var from = Math.max(0, hist.length - 25);
+      for (var i = hist.length - 1; i >= from; i--) lines.push('[' + (i + 1) + '] ' + hist[i]);
+    }
+    out.textContent = lines.join('\n');
   }
   show();
-  document.addEventListener('click', show);
   setInterval(show, 2000);
 })();
 </script>

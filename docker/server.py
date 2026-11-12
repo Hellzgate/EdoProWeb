@@ -976,6 +976,22 @@ async def main():
         asyncio.get_event_loop().run_in_executor(None, lambda: [sync_repo(s) for s in DEFAULT_REPOS])
     asyncio.ensure_future(auto_sync_repos())
     server = await asyncio.start_server(handle, "0.0.0.0", PORT, backlog=128)
+
+    # ---- HTTPS 리스너(선택) ----
+    # Chrome(안드로이드)은 사설망 평문 HTTP 를 ERR_TOO_MANY_RETRIES 로 막는 경우가 있어,
+    # 자체 서명 인증서로 HTTPS 를 함께 제공한다. (인증서는 이미지에 /app/cert 에 둔다)
+    https_port = int(os.environ.get("HTTPS_PORT", "8443"))
+    cert_dir = os.environ.get("CERT_DIR", "/app/cert")
+    certfile = os.path.join(cert_dir, "cert.pem")
+    keyfile = os.path.join(cert_dir, "key.pem")
+    https_server = None
+    if https_port and os.path.isfile(certfile) and os.path.isfile(keyfile):
+        import ssl
+        ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ssl_ctx.load_cert_chain(certfile, keyfile)
+        https_server = await asyncio.start_server(handle, "0.0.0.0", https_port, ssl=ssl_ctx, backlog=128)
+        log(f"serving https on :{https_port} (self-signed)")
+
     async with server:
         await server.serve_forever()
 
