@@ -22,3 +22,7 @@ ENV PORT=8080 \
 
 EXPOSE 8080
 CMD ["python3", "-u", "/app/server.py"]
+
+# 초기 전송량 감축: 큰 정적 파일을 미리 압축해 둔다(서버가 Accept-Encoding: gzip 일 때 .gz 를 보낸다)
+RUN cd /app/web && for f in edopro-full.js edopro-full.wasm edopro-full.data; do \
+      gzip -6 -k -f "$f"; done && ls -l /app/web/*.gz

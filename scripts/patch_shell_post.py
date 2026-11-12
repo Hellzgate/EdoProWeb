@@ -91,12 +91,39 @@ EDOPRO_JLOG = r"""
 /* 브라우저 콘솔/오류를 서버(/api/jlog)로 보낸다 — 모바일에서 DevTools 없이 진단하기 위함 */
 (function () {
   var sent = 0;
+  var DEBUG_LOG = location.search.indexOf('debug') >= 0;
+  var SYNC_LOG = location.search.indexOf('jlogsync') >= 0;
   function send(m) {
-    if (sent > 400) return;
+    if (sent > 4000) return;
+    if (!DEBUG_LOG) {
+      var s0 = String(m);
+      if (s0.indexOf('[flow]') >= 0 || s0.indexOf('[step]') >= 0) return;
+    }
     sent++;
-    try { navigator.sendBeacon('/api/jlog?m=' + encodeURIComponent(String(m).slice(0, 380))); } catch (e) {}
+    var u = '/api/jlog?m=' + encodeURIComponent(String(m).slice(0, 380));
+    try {
+      if (SYNC_LOG) {
+        /* 진단용: 크래시로 큐가 유실되지 않도록 동기 전송 */
+        var x = new XMLHttpRequest();
+        x.open('GET', u, false);
+        x.send(null);
+      } else {
+        navigator.sendBeacon(u);
+      }
+    } catch (e) {}
   }
   window.__jlog = send;
+  function __desc(e) {
+    if (e === null || e === undefined) return String(e);
+    if (typeof e === 'string') return e;
+    try { if (e instanceof Error) return (e.name + ': ' + e.message + (e.stack ? ('\n' + e.stack.split('\n').slice(0, 4).join(' | ')) : '')); } catch (x) {}
+    var s = '';
+    try { s = JSON.stringify(e); } catch (x) {}
+    var cn = '';
+    try { cn = (e.constructor && e.constructor.name) || ''; } catch (x) {}
+    return (cn ? (cn + ': ') : '') + (s || String(e));
+  }
+  window.__desc = __desc;
   var names = ['log', 'warn', 'error'];
   for (var i = 0; i < names.length; i++) {
     (function (name) {
@@ -117,27 +144,32 @@ EDOPRO_JLOG = r"""
   });
   window.addEventListener('unhandledrejection', function (e) {
     var r = e.reason;
-    send('REJ ' + ((r && (r.stack || r.message)) || r));
+    send('REJ ' + window.__desc(r));
   });
-  /* 프레임/캔버스 상태 하트비트 (모바일에서 화면이 안 나올 때 원인 파악용) */
-  var __frames = 0;
-  (function __tick() { __frames++; requestAnimationFrame(__tick); })();
-  var __hb = 0;
-  setInterval(function () {
-    __hb++;
-    var c = document.querySelector('canvas');
-    var lost = '?';
-    try {
-      var gl = c && (c.getContext('webgl2') || c.getContext('webgl') || c.getContext('experimental-webgl'));
-      if (gl && gl.isContextLost) lost = gl.isContextLost() ? 1 : 0;
-    } catch (e) { lost = 'EX'; }
-    var r = c && c.getBoundingClientRect ? c.getBoundingClientRect() : null;
-    send('hb' + __hb + ' ready=' + document.readyState + ' frames=' + __frames +
-         ' canvas=' + (c ? c.width + 'x' + c.height : '-') +
-         ' css=' + (r ? Math.round(r.width) + 'x' + Math.round(r.height) : '-') +
-         ' called=' + ((window.Module && Module.calledRun) ? 1 : 0) +
-         ' lost=' + lost + ' vis=' + document.visibilityState);
-  }, 5000);
+  /* 하트비트는 ?diag=1 일 때만, 그리고 **별도 캔버스**로만 검사한다.
+     게임 캔버스에 getContext('webgl2') 를 먼저 호출하면 그 캔버스가 webgl2 로 고정되어
+     emscripten 의 webgl1 컨텍스트 생성이 실패한다(실측) — 절대 건드리지 않는다. */
+  if (location.search.indexOf('diag') >= 0) {
+    var __frames = 0;
+    (function __tick() { __frames++; requestAnimationFrame(__tick); })();
+    var __hb = 0;
+    setInterval(function () {
+      __hb++;
+      var c = document.querySelector('canvas');
+      var lost = '?';
+      try {
+        var probe = document.createElement('canvas');
+        var gl = probe.getContext('webgl2') || probe.getContext('webgl');
+        if (gl && gl.isContextLost) lost = gl.isContextLost() ? 1 : 0;
+      } catch (e) { lost = 'EX'; }
+      var r = c && c.getBoundingClientRect ? c.getBoundingClientRect() : null;
+      send('hb' + __hb + ' ready=' + document.readyState + ' frames=' + __frames +
+           ' canvas=' + (c ? c.width + 'x' + c.height : '-') +
+           ' css=' + (r ? Math.round(r.width) + 'x' + Math.round(r.height) : '-') +
+           ' called=' + ((window.Module && Module.calledRun) ? 1 : 0) +
+           ' lost=' + lost + ' vis=' + document.visibilityState);
+    }, 5000);
+  }
   send('page start ' + location.href.slice(0, 120) + ' ua=' + navigator.userAgent.slice(0, 60));
 })();
 </script>
@@ -177,7 +209,7 @@ EDOPRO_LOAD = r"""
 
   function show(text) { if (msg) msg.textContent = text; }
   function fail(text) {
-    var e = String(text || '');
+    var e = (window.__desc ? window.__desc(text) : String(text || ''));
     if (err && !err.textContent) err.textContent = e.slice(0, 300);
     if (btn) btn.classList.add('on');
     show('불러오지 못했습니다. 네트워크를 확인하고 다시 시도하세요.');
@@ -190,7 +222,8 @@ EDOPRO_LOAD = r"""
   var tick = setInterval(function () {
     if (done) { clearInterval(tick); return; }
     try {
-      if (window.Module && Module.calledRun) {
+      var cvs = document.querySelector('canvas');
+      if ((window.Module && Module.calledRun) || (cvs && cvs.width > 320)) {
         done = true; clearInterval(tick);
         box.classList.add('off');
         return;
@@ -211,10 +244,13 @@ EDOPRO_LOAD = r"""
     }
   }, 300);
 
-  window.addEventListener('error', function (e) { if (e && e.message) fail(e.message); });
+  window.addEventListener('error', function (e) {
+    if (e && e.message && e.message !== 'Script error.') fail(e.message);
+  });
+  /* 거부된 프로미스는 게임이 계속 돌 수 있으므로 경고만 남기고 화면을 막지 않는다 */
   window.addEventListener('unhandledrejection', function (e) {
-    var r = e && e.reason;
-    fail((r && (r.message || r)) || 'unknown');
+    var d = (window.__desc ? window.__desc(e && e.reason) : 'unknown');
+    if (window.__jlog) window.__jlog('WARN-REJ ' + d);
   });
   window.addEventListener('offline', function () { fail('네트워크 연결이 끊겼습니다.'); });
 })();
@@ -255,16 +291,18 @@ window.addEventListener('unhandledrejection', function (e) {
       hintEl.textContent = '\uAC00\uB85C\uB85C \uB3CC\uB9AC\uBA74 \uB354 \uD06C\uAC8C \uBCF4\uC785\uB2C8\uB2E4';
       document.body.appendChild(hintEl);
     }
-    hintEl.className = (H > W * 1.15) ? 'on' : '';
+    var want = (H > W * 1.15) ? 'on' : '';
+    if (hintEl.className !== want) hintEl.className = want;
   }
   window.__edoproFit = fit;
+  if (location.search.indexOf('nofit') >= 0) return;   /* 진단용: 화면 맞춤 비활성 */
   window.addEventListener('resize', fit);
   document.addEventListener('DOMContentLoaded', fit);
   window.addEventListener('load', fit);
   var n = 0;
   var t = setInterval(function () { fit(); if (++n > 240) clearInterval(t); }, 250);
   try {
-    new MutationObserver(fit).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class', 'width', 'height'] });
+    new MutationObserver(fit).observe(document.body, { childList: true, subtree: true });
   } catch (e) {}
 })();
 
@@ -465,6 +503,10 @@ window.addEventListener('unhandledrejection', function (e) {
         if (ready || ++n > 1200) {
           try { applyRepoBundle(); } catch (e) { console.log('[repo] fail: ' + e); }
           try { restoreConfigOnly(); } catch (e) { console.log('[userdata] cfg restore fail: ' + e); }
+          /* 덱/리플레이 복원도 preRun(=프리로드 완료 후, main 진입 전)에서 한다.
+             부팅 후에 하면 게임이 이미 목록을 읽은 뒤라 반영되지 않는다. */
+          try { ensureDirs(); } catch (e) { console.log('[userdata] ensureDirs fail: ' + e); }
+          try { restore(); } catch (e) { console.log('[userdata] restore fail: ' + e); }
           rem('edopro-config-restore');
           return;
         }
@@ -488,6 +530,8 @@ window.addEventListener('unhandledrejection', function (e) {
   /* 덱/리플레이 복원은 **부팅이 끝난 뒤**에 한다.
      preRun 에서 MEMFS 에 쓰면 프리로드(.data) 해제와 충돌해 게임이 ErrnoError 로 죽는다. */
   function waitBoot(cb) {
+    /* 이 게임은 main() 이 끝나지 않으므로 Module.calledRun 은 영원히 false 다.
+       Irrlicht 가 캔버스를 실제 크기(>320)로 바꾸는 순간을 부팅 완료로 본다. */
     var n = 0;
     var t = setInterval(function () {
       var c = document.querySelector('canvas');
@@ -496,10 +540,8 @@ window.addEventListener('unhandledrejection', function (e) {
   }
   waitBoot(function () {
     setTimeout(function () {
-      try { ensureDirs(); } catch (e) { console.log('[userdata] ensureDirs fail: ' + e); }
-      try { restore(); } catch (e) { console.log('[userdata] restore fail: ' + e); }
-      startSaver();
-    }, 1200);
+      try { startSaver(); } catch (e) { console.log('[userdata] saver fail: ' + e); }
+    }, 2500);
   });
 
   /* 부팅 완료 후 주기 저장 시작 */
@@ -577,6 +619,22 @@ window.addEventListener('unhandledrejection', function (e) {
 })();
 </script>
 """
+
+# ---------------------------------------------------------------------------
+# EDOPRO_STRIP: 이 스크립트를 여러 번 돌려도 블록이 중복되지 않게, 이전에 주입한
+# 블록을 먼저 제거한다. (중복 주입된 HTML 은 브라우저에서 페이지가 멈췄다)
+# ---------------------------------------------------------------------------
+import re as _re
+
+def _strip_injected(html):
+    html = _re.sub(r"<script>\s*/\* 브라우저 콘솔/오류를 서버.*?</script>", "", html, flags=_re.S)
+    html = _re.sub(r"<style>\s*#edopro-load\{.*?</script>", "", html, flags=_re.S)
+    html = _re.sub(r"<script>\s*/\* \?diag=1 이면.*?</script>", "", html, flags=_re.S)
+    html = _re.sub(r"<link[^>]*>\s*", "", html, count=0) if False else html
+    return html
+
+s = _strip_injected(s)
+print("strip: 이전 주입 블록 제거 (%d bytes)" % len(s))
 
 if "body>.emscripten_border" not in s:
     s = re.sub(r"<style>html,body\{margin:0.*?</style>", "", s, flags=re.S)

@@ -896,6 +896,15 @@ async def handle(reader, writer):
         ext = os.path.splitext(full)[1].lower()
         size = os.path.getsize(full)
 
+        # ---- gzip 사전 압축본 서빙 (초기 전송량 1/3) ----
+        # Range 요청(청크 로더)에는 원본을 그대로 보낸다(부분 압축은 불가).
+        _ae = (headers.get("accept-encoding") or "").lower()
+        _range = headers.get("range") or ""
+        use_gz = (not _range) and ("gzip" in _ae) and os.path.isfile(full + ".gz")
+        if use_gz:
+            full = full + ".gz"
+            size = os.path.getsize(full)
+
         # ---- Range 지원 (모바일 청크 로더가 조각으로 받아간다) ----
         start, end = 0, size - 1
         partial = False
@@ -922,11 +931,13 @@ async def handle(reader, writer):
             log("static %s %d-%d/%d ua=%s" % (path, start, end, size, _ua))
 
         hdr = ("HTTP/1.1 " + ("206 Partial Content" if partial else "200 OK") + "\r\n"
-               "Content-Type: " + MIME.get(ext, "application/octet-stream") + "\r\n"
-               "Content-Length: " + str(length) + "\r\n"
-               "Accept-Ranges: bytes\r\n"
-               "Connection: close\r\n"
-               "Cache-Control: no-cache\r\n")
+               + "Content-Type: " + MIME.get(ext, "application/octet-stream") + "\r\n"
+               + "Content-Length: " + str(length) + "\r\n"
+               + "Accept-Ranges: bytes\r\n"
+               + "Connection: close\r\n"
+               + ("Content-Encoding: gzip\r\n" if use_gz else "")
+               + "Vary: Accept-Encoding\r\n"
+               + "Cache-Control: no-cache\r\n")
         if partial:
             hdr += "Content-Range: bytes %d-%d/%d\r\n" % (start, end, size)
         writer.write((hdr + "\r\n").encode())
@@ -945,6 +956,8 @@ async def handle(reader, writer):
                     await writer.drain()
                     if remain > 0:
                         await asyncio.sleep(0)
+                if length > (1 << 20):
+                    log("done %s sent=%d/%d" % (path, length - remain, length))
         await writer.drain()
         writer.close()
     except Exception as e:
