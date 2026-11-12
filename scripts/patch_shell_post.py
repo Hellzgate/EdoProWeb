@@ -93,10 +93,13 @@ EDOPRO_JLOG = r"""
   var sent = 0;
   var DEBUG_LOG = location.search.indexOf('debug') >= 0;
   var SYNC_LOG = location.search.indexOf('jlogsync') >= 0;
+  var NOLOG = location.search.indexOf('nolog') >= 0;
   function send(m) {
+    if (NOLOG) return;
     if (sent > 4000) return;
+    var s0 = String(m);
+    try { localStorage.setItem('edopro-last', s0.slice(0, 300)); localStorage.setItem('edopro-last-at', String(Date.now())); } catch (e) {}
     if (!DEBUG_LOG) {
-      var s0 = String(m);
       if (s0.indexOf('[flow]') >= 0 || s0.indexOf('[step]') >= 0) return;
     }
     sent++;

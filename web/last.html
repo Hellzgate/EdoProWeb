@@ -1,0 +1,28 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>last log</title>
+<style>
+html,body{margin:0;background:#0d0f13;color:#e6e6e6;font:16px/1.6 monospace}
+#out{padding:14px;white-space:pre-wrap;word-break:break-all}
+b{color:#7fd4ff}
+</style>
+<pre id="out">읽는 중…</pre>
+<script>
+(function () {
+  var out = document.getElementById('out');
+  function show() {
+    var m = null, at = null;
+    try { m = localStorage.getItem('edopro-last'); at = localStorage.getItem('edopro-last-at'); } catch (e) {}
+    var t = '';
+    if (at) { try { t = new Date(Number(at)).toLocaleTimeString(); } catch (e) {} }
+    out.textContent =
+      '마지막 로그: ' + (m || '(없음)') + '\n' +
+      '시각: ' + (t || '-') + '\n' +
+      '\n[ 새로고침 ] 로 다시 읽습니다.';
+  }
+  show();
+  document.addEventListener('click', show);
+  setInterval(show, 2000);
+})();
+</script>
