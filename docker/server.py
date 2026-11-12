@@ -197,21 +197,15 @@ def fetch_image(rel):
     _base = name.split("/")[-1]
     _id = _base.split(".")[0]
     is_custom = _id.isdigit() and len(_id) >= 9
-    if is_custom:
-        # 커스텀/프리릴리즈 카드는 원격에 없을 가능성이 매우 높다 → 원격 조회 생략(즉시 404)
-        try:
-            os.makedirs(os.path.dirname(miss_marker), exist_ok=True)
-            with open(miss_marker, "wb") as f:
-                f.write(b"1")
-        except Exception:
-            pass
-        return None
+    # 주의: 프리릴리즈/커스텀 카드(1014xxxx 등)도 ygoprodeck 에 **실제 이미지가 있다**(실측 200).
+    #   "커스텀은 원격에 없다"고 가정해 즉시 404 를 반환하면 프릴 이미지가 전부 사라진다.
+    #   → 원격 조회는 그대로 하고, **실패만** .miss 로 캐시한다.
 
     for tpl in tpls:
         url = tpl.format(name)
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "edopro-web"})
-            with urllib.request.urlopen(req, timeout=(4 if is_custom else 12)) as r:
+            with urllib.request.urlopen(req, timeout=(8 if is_custom else 12)) as r:
                 data = r.read()
             if len(data) > 500:
                 with open(cached, "wb") as f:
