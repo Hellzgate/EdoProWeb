@@ -128,3 +128,27 @@ pthread 빌드는 **ASYNCIFY 와 동시 사용 불가**(emsdk 문서/실측) —
 4. `StopPlay` 시 fiber 종료 경로 정리
 
 주의: 스왑 지점은 **메인이 gMutex 를 잡지 않은 곳**(프레임 끝)이어야 한다.
+
+---
+
+## 7. 게임 통합 시도 → **실패(되돌림)** (2026-11-13)
+
+PoC 를 게임에 붙여 3가지를 시도했지만 모두 **`RuntimeError: function signature mismatch`**
+(`finishContextSwitch` → `invoke_ii`) 로 실패했다.
+
+| 시도 | 내용 | 결과 |
+|---|---|---|
+| 1 | `StartPlay` 에서 즉시 fiber 진입 | `finishContextSwitch` 경유 오류 |
+| 2 | 첫 진입을 `MainLoop` 프레임 끝(`Pump`)으로 지연 | 동일 오류 |
+| 3 | `Signal` 을 flag+양보로 교체(워커/메인 분기) | 동일 오류 |
+
+**추정 원인**: 이 빌드는 `-fexceptions`(invoke_* 래퍼) + `-sASYNCIFY` 조합인데,
+fiber 스택에서 간접 호출/예외 래퍼가 섞이면 **함수 포인터 시그니처 검사**에서 걸린다.
+(순수 C PoC 는 예외 래퍼가 없어 정상 동작)
+
+**다음 시도 후보**
+1. `-fno-exceptions` 로 gframe 전체 빌드(오디오/코어 예외 처리 영향 확인 필요) + fiber
+2. fiber 대신 **B안**(메인 루프 `emscripten_set_main_loop` 전환 + `Wait()` → `emscripten_sleep`) 
+3. `SingleMode` 를 **별도 Web Worker + SharedArrayBuffer**(pthreads) 로 — ASYNCIFY 제거 선행
+
+현재는 **E안(버튼 숨김)** 으로 되돌려 서비스 안정성을 유지한다(v1.23.4).

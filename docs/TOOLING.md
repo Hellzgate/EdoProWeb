@@ -19,8 +19,9 @@
 ssh mini 'cd ~/edo-src/ocgwasm && bash rebuild-one.sh image_manager.cpp'
 # 링크만 (셸 패치 반영)
 ssh mini 'cd ~/edo-src/ocgwasm && bash link-default.sh'
-# 배포
-ssh mini 'cd ~/edopro-docker && docker build -q -t edopro-web:X.Y.Z . && docker rm -f edopro-web && docker run -d ... edopro-web:X.Y.Z'
+# 배포 (압축 → 빌드 → 교체)
+ssh mini 'python3 ~/edo-src/ocgwasm/precompress.py ~/edopro-docker/web && \
+  cd ~/edopro-docker && docker build -q -t edopro-web:X.Y.Z . && docker rm -f edopro-web && docker run -d ... edopro-web:X.Y.Z'
 ```
 
 ---
@@ -108,3 +109,16 @@ $adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
 1. **`_tmp` 패치 스크립트 승격** — 반복 사용한 `patch_*.py` 중 필요한 것만 `scripts/` 로 이동
 2. **wasm 심볼 빌드**(`-g`) — `function signature mismatch`(패 테스트) 스택 심볼화
 3. **DeX 검증 절차** — 폰 화면 캡처 불가: PC 브라우저/사용자 확인으로 대체(문서화됨)
+
+---
+
+## 5. 전송 최적화 (v1.24)
+
+| 도구 | 용도 | 비고 |
+|---|---|---|
+| `scripts/precompress.py` | `.gz` + `.br` 생성 | brotli q9: wasm 10초 · data 31초(배포 때 1회) |
+| `curl -H 'Accept-Encoding: br' -D -` | 인코딩 확인 | `Content-Encoding: br` 이면 정상 |
+
+- **함정**: 평문 HTTP 에서 **Chrome 은 `br` 을 보내지 않는다**(gzip 77.5MB). HTTPS(`:8451`, `:8443`)에서만 60.3MB.
+- **함정**: 폰트 등 백업 파일을 `~/edopro-assets/` **안에** 두면 `--preload-file` 에 함께 들어가 `.data` 가 커진다.
+- 번들 JSON 은 요청 시 brotli(4초) → **etag 별 캐시**(`_bundle_enc_cache`). 서버 재시작 후 첫 요청만 느리다.

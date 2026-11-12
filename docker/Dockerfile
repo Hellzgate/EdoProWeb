@@ -31,6 +31,16 @@ ENV PORT=8080 \
 EXPOSE 8080 8443
 CMD ["python3", "-u", "/app/server.py"]
 
-# 초기 전송량 감축: 큰 정적 파일을 미리 압축해 둔다(서버가 Accept-Encoding: gzip 일 때 .gz 를 보낸다)
-RUN cd /app/web && for f in edopro-full.js edopro-full.wasm edopro-full.data; do \
-      gzip -6 -k -f "$f"; done && ls -l /app/web/*.gz
+# 저장소 번들(50MB JSON)을 brotli 로 압축해 보내기 위한 모듈(11.3MB gzip → 6.1MB br)
+RUN pip install --no-cache-dir brotli
+
+# 초기 전송량 감축: 큰 정적 파일을 미리 압축해 둔다.
+#   서버는 Accept-Encoding 에 따라 .br → .gz 순으로 고른다(부팅 81.3MB → 54.2MB).
+#   .br 은 scripts/precompress.py 가 미리 만들어 두며(빌드 시간 절약), 없으면 .gz 만 쓴다.
+COPY web/edopro-full.js.gz   /app/web/edopro-full.js.gz
+COPY web/edopro-full.wasm.gz /app/web/edopro-full.wasm.gz
+COPY web/edopro-full.data.gz /app/web/edopro-full.data.gz
+COPY web/edopro-full.js.br   /app/web/edopro-full.js.br
+COPY web/edopro-full.wasm.br /app/web/edopro-full.wasm.br
+COPY web/edopro-full.data.br /app/web/edopro-full.data.br
+RUN ls -l /app/web/*.gz /app/web/*.br

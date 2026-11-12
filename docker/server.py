@@ -434,6 +434,8 @@ document.querySelectorAll('a.del').forEach(function(a){
 
 # ---------------- 저장소(repository) → 게임 데이터 매핑 ----------------
 _bundle_cache = {"key": None, "json": None, "etag": None}
+# brotli 로 압축한 번들 본문(언어별 etag 키) — 50MB JSON 압축은 4초라 매 요청 재계산 금지
+_bundle_enc_cache = {"key": None, "body": None}
 
 
 def _repo_state_key():
@@ -1017,8 +1019,25 @@ async def handle(reader, writer):
                 await writer.drain()
                 writer.close()
                 return
-            # 부팅 시 30~40MB JSON → gzip(약 1/4). 브라우저 XHR 이 자동 해제한다.
-            if "gzip" in (headers.get("accept-encoding") or "").lower() and len(body) > 65536:
+            # 부팅 시 50MB JSON → 압축해 보낸다(브라우저 XHR 이 자동 해제).
+            #   brotli(q9) 실측 11.3MB(gzip) → 6.1MB. 언어별로 한 번만 계산해 캐시한다.
+            _ae = (headers.get("accept-encoding") or "").lower()
+            if "br" in _ae and len(body) > 65536:
+                try:
+                    import brotli as _br
+                    _ck = ("br", etag)
+                    if _bundle_enc_cache.get("key") != _ck:
+                        _bundle_enc_cache["body"] = _br.compress(body, quality=9, lgwin=24)
+                        _bundle_enc_cache["key"] = _ck
+                    body = _bundle_enc_cache["body"]
+                    writer.write(resp(200, "OK", body, "application/json; charset=utf-8",
+                                      f"ETag: {etag}\r\nContent-Encoding: br\r\nVary: Accept-Encoding\r\nCache-Control: no-cache\r\n"))
+                    await writer.drain()
+                    writer.close()
+                    return
+                except Exception as _e:
+                    log("bundle brotli fail: %s" % _e)
+            if "gzip" in _ae and len(body) > 65536:
                 try:
                     import gzip as _gzip
                     body = _gzip.compress(body, 6)
@@ -1100,14 +1119,22 @@ async def handle(reader, writer):
         ext = os.path.splitext(full)[1].lower()
         size = os.path.getsize(full)
 
-        # ---- gzip 사전 압축본 서빙 (초기 전송량 1/3) ----
+        # ---- 사전 압축본 서빙 (brotli > gzip, 초기 전송량 1/3) ----
         # Range 요청(청크 로더)에는 원본을 그대로 보낸다(부분 압축은 불가).
         _ae = (headers.get("accept-encoding") or "").lower()
         _range = headers.get("range") or ""
-        use_gz = (not _range) and ("gzip" in _ae) and os.path.isfile(full + ".gz")
-        if use_gz:
-            full = full + ".gz"
+        _enc = ""
+        if not _range:
+            # brotli 가 있으면 우선(같은 파일의 .br). wasm 13.4→8.9MB, data 52.6→45.0MB 실측
+            if "br" in _ae and os.path.isfile(full + ".br"):
+                _enc = "br"
+            elif "gzip" in _ae and os.path.isfile(full + ".gz"):
+                _enc = "gzip"
+        if _enc:
+            full = full + "." + ("br" if _enc == "br" else "gz")
             size = os.path.getsize(full)
+        use_gz = _enc == "gzip"
+        use_br = _enc == "br"
 
         # ---- Range 지원 (모바일 청크 로더가 조각으로 받아간다) ----
         start, end = 0, size - 1
@@ -1140,7 +1167,7 @@ async def handle(reader, writer):
             _mt = int(os.path.getmtime(full))
         except OSError:
             _mt = 0
-        _etag = 'W/"%x-%x%s"' % (size, _mt, "g" if use_gz else "")
+        _etag = 'W/"%x-%x%s"' % (size, _mt, ("g" if use_gz else ("b" if use_br else "")))
         _inm = (headers.get("if-none-match") or "").strip()
         _ims = (headers.get("if-modified-since") or "").strip()
         if not partial and method in ("GET", "HEAD") and (
@@ -1160,7 +1187,7 @@ async def handle(reader, writer):
                + "Content-Length: " + str(length) + "\r\n"
                + "Accept-Ranges: bytes\r\n"
                + "Connection: close\r\n"
-               + ("Content-Encoding: gzip\r\n" if use_gz else "")
+               + ("Content-Encoding: " + _enc + "\r\n" if _enc else "")
                + "Vary: Accept-Encoding\r\n"
                + "ETag: " + _etag + "\r\n"
                + "Last-Modified: " + _email_date(_mt) + "\r\n"

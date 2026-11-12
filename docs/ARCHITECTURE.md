@@ -1,6 +1,7 @@
 # EDOPro Web — 아키텍처 / 모듈 지도
 
-- 버전: **1.16.7** (이미지 `edopro-web:1.16.7`)
+- 버전: **1.24.4** (이미지 `edopro-web:1.24.4`)
+- 전송: `.br`(brotli) 우선 → 부팅 **60.3MB**(이전 81.3MB)
 - 구성: **브라우저(wasm) + 정적·중계 서버(Python asyncio) + DSM HTTPS 역프록시**
 - 원본: Project Ignis EDOPro 41.0.2 (gframe + irrlicht + ocgcore) / SDL2 2.32.10 / emscripten
 
@@ -23,8 +24,10 @@
 |---|---|---|
 | `docker/server.py` | **서버(단일 파일, 7개 논리 모듈)** | 아래 §2 |
 | `docker/app/` | (분리 예정/없음) | 현재는 server.py 내부 섹션으로 구분 |
-| `docker/Dockerfile` | 이미지 | nginx 없이 python asyncio 로 직접 서빙 + `.gz` 사전 압축 |
-| `scripts/patch_shell_post.py` | **셸 주입기** | emscripten HTML 에 CSS/JS 를 삽입(멱등) |
+| `docker/Dockerfile` | 이미지 | nginx 없이 python asyncio 로 직접 서빙 + `.gz`/`.br` 사전 압축 |
+| `scripts/patch_shell_post.py` | **셸 주입기(오케스트레이터)** | emscripten HTML 에 자산을 순서대로 삽입(멱등) |
+| `scripts/shell/*` | **셸 자산(12개)** | `layout.css` · `boot.js`(유저데이터/저장소/세이버) · `ime.js` · `screenshot.js` · `fullscreen.js` · `fs-start.js` · `files.js` · `audio.js` · `board.js` · `jlog.js` · `load.js` · `diag.js` |
+| `scripts/precompress.py` | 전송 최적화 | `web/*.{js,wasm,data}` 의 `.gz` + `.br` 생성(배포 전 1회) |
 | `scripts/build-irrlicht.sh` | 빌드 | irrlicht 전체 오브젝트(`irr-emcc/obj`) |
 | `scripts/build-gframe-audio.sh` | 빌드 | gframe 오브젝트(`gframe-emcc3/obj`) — `repo_manager.cpp`, `image_downloader.cpp` 제외 |
 | `scripts/link-default.sh` | 링크 | wasm/html/data 생성 + `.gz` + postprocess 호출 |
@@ -49,7 +52,7 @@
 | # | 모듈(섹션) | 주요 함수 | 노출 경로 |
 |---|---|---|---|
 | M1 | **설정/유틸** | 환경변수, `MIME`, `log()`, `resp()`, `read_head()` | — |
-| M2 | **정적 파일** | gzip 사전압축 선택, Range 지원, COOP/COEP 헤더 | `/`, `/edopro-full.*`, `*.html` |
+| M2 | **정적 파일** | `.br` → `.gz` → 원본 선택, Range 지원, COOP/COEP 헤더 | `/`, `/edopro-full.*`, `*.html` |
 | M3 | **이미지** | `_safe_pic()`, `fetch_image()` (디스크 캐시) | `/img/<id>.jpg`, `/img/field/…`, `/img/cover/…` |
 | M4 | **사용자 데이터** | `load_userdata()`, `save_userdata()`, `_ud_read_file()`, `_ud_write_file()`, `_file_kind()`, `render_files_page()` | `/api/userdata`, `/api/userdata/file`, `/files.html` |
 | M5 | **저장소(git)** | `sync_repo()`, `list_repos()`, `build_repo_bundle()`, `make_tar()`, `auto_sync_repos()`, `repo_bundle_summary()` | `/api/repos`, `/api/repos/sync`, `/api/repos.tar`, `/api/repos/bundle` |
@@ -134,3 +137,25 @@ curl -s -i -N --max-time 5 --http1.1 -H "Connection: Upgrade" -H "Upgrade: webso
      "http://127.0.0.1:7556/ws?host=192.168.0.4&port=7911" | head -1     # 101
 ```
 브라우저 진단: `/last.html`(로그), `/view.html`(해상도), `/repos.html`(저장소), `?diag=1`, `?nofit=1`, `?sync=0`.
+
+---
+
+## 7. 셸 주입 자산 (v1.24)
+
+`patch_shell_post.py` 는 **오케스트레이터**다. 실제 주입 내용은 `scripts/shell/` 의 파일이고,
+`_asset(name)` 이 그대로 읽어 넣는다(주입 결과 = 파일 내용).
+
+| 자산 | 삽입 지점(마커) | 책임 |
+|---|---|---|
+| `layout.css` | `<head>` | 게임 화면만 표시, 토스트/버튼/IME 스타일 |
+| `jlog.js` | `</head>` | 브라우저 콘솔·오류 서버 전송 |
+| `load.js` | `<body>` | 로딩 오버레이 |
+| `boot.js` | `</body>`(맨 앞) | 덱/리플레이/설정 저장·복원, 저장소 번들 적용, ETag, topbar |
+| `ime.js` | `</body>` | 모바일 IME 브리지(`Module.__edoproIME`) |
+| `screenshot.js` | `</body>` | 📷 스크린샷(`gl.readPixels`) |
+| `fullscreen.js` | `</body>` | 전체화면 버튼 |
+| `fs-start.js` / `files.js` / `audio.js` / `board.js` | `</body>` | 시작 안내 / 파일 페이지 링크 / 오디오 unlock / 보드 오버레이 |
+| `diag.js` | `</body>`(맨 뒤) | `?diag=1` 진단 패널 |
+
+- **불변 규칙**: 자산 파일의 **앞뒤 개행을 보존**해야 주입 HTML 이 바이트 동일해진다(검증: `cmp`).
+- 새 자산을 추가하면 `_strip_injected()` 에도 마커 정규식을 넣어 **중복 주입**을 막는다.
