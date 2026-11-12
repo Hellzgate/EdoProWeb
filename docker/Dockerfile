@@ -15,6 +15,7 @@ COPY web/webgltest.html /app/web/webgltest.html
 COPY web/probe.html /app/web/probe.html
 COPY web/probe2.html /app/web/probe2.html
 COPY web/view.html /app/web/view.html
+COPY web/last.html /app/web/last.html
 COPY web/manifest.json /app/web/manifest.json
 COPY web/icon-192.png /app/web/icon-192.png
 COPY web/icon-512.png /app/web/icon-512.png
