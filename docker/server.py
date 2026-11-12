@@ -16,6 +16,7 @@
 
 import asyncio
 import base64
+import email.utils
 import hashlib
 import io
 import json
@@ -26,6 +27,13 @@ import subprocess
 import tarfile
 import urllib.parse
 
+def _email_date(ts):
+    """Last-Modified 헤더용 RFC1123 문자열(실패해도 예외 없이)."""
+    try:
+        return email.utils.formatdate(int(ts), usegmt=True)
+    except Exception:
+        return "Thu, 01 Jan 1970 00:00:00 GMT"
+
 WS_GUID = b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 PORT = int(os.environ.get("PORT", "8080"))
@@ -33,6 +41,48 @@ ROOT = os.environ.get("ROOT", "/app/web")
 BRIDGE_TARGET = os.environ.get("BRIDGE_TARGET", "").strip()
 REPO_ROOT = os.environ.get("REPO_ROOT", "/app/repos")
 DEFAULT_REPOS = [r.strip() for r in os.environ.get("REPOS", "ProjectIgnis/BabelCDB").split(",") if r.strip()]
+GAME_CONFIG_DIR = os.environ.get("GAME_CONFIG_DIR", "/app/config")
+
+
+def _load_game_config():
+    """EDOPro 의 config/configs.json + user_configs.json 을 읽어
+       (repos, url_templates) 를 돌려준다. (원본과 같은 '설정된 주소' 동작)"""
+    repos, urls = [], []
+    for name in ("configs.json", "user_configs.json"):
+        path = os.path.join(GAME_CONFIG_DIR, name)
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as f:
+                j = json.load(f)
+        except Exception as e:
+            print(f"[web] config {name} parse fail: {e}", flush=True)
+            continue
+        for r in (j.get("repos") or []):
+            if not isinstance(r, dict):
+                continue
+            if r.get("should_read") is False and r.get("should_update") is False:
+                continue
+            if r.get("is_language"):
+                continue   # 언어팩은 .data 에 내장되어 있음(중복 다운로드 방지)
+            m = re.search(r"github\.com/([^/]+)/([^/#?]+)", (r.get("url") or ""))
+            if m:
+                spec = f"{m.group(1)}/{m.group(2)}"
+                spec = spec[:-4] if spec.endswith(".git") else spec
+                if spec not in repos:
+                    repos.append(spec)
+        for u in (j.get("urls") or []):
+            if isinstance(u, dict) and u.get("url") and "{}" in u["url"]:
+                urls.append({"type": (u.get("type") or "pic").lower(), "url": u["url"]})
+    return repos, urls
+
+
+_cfg_repos, CFG_URLS = _load_game_config()
+for _r in _cfg_repos:
+    if _r not in DEFAULT_REPOS:
+        DEFAULT_REPOS.append(_r)
+if _cfg_repos:
+    print(f"[web] config repos: {', '.join(_cfg_repos)}", flush=True)
 LOBBY_UPSTREAM = os.environ.get("LOBBY_UPSTREAM", "http://192.168.0.4:7922").rstrip("/")
 # 1 이면 클라이언트가 요청한 host:port 로 접속한다(여러 서버 지원).
 # BRIDGE_FORCE=1 이면 BRIDGE_TARGET 으로 고정(기존 동작).
@@ -99,7 +149,18 @@ def fetch_image(rel):
         with open(cached, "rb") as f:
             return f.read()
     import urllib.request
-    for tpl in PIC_UPSTREAM:
+    # field/cover 는 게임 config 의 urls 템플릿을 우선 사용(원본과 동일)
+    tpls = list(PIC_UPSTREAM)
+    try:
+        kind = "field" if name.startswith("field/") else ("cover" if name.startswith("cover/") else "pic")
+        for u in CFG_URLS:
+            if u.get("type") == kind:
+                tpls.insert(0, u["url"])
+        if kind != "pic":
+            tpls = [t for t in tpls if "images/cards" not in t]
+    except Exception:
+        pass
+    for tpl in tpls:
         url = tpl.format(name)
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "edopro-web"})
@@ -722,6 +783,13 @@ async def handle(reader, writer):
             return
 
         # ---- API ----
+        if path == "/api/beacon":
+            # 클라이언트가 자기 빌드/IME 상태를 알려준다(진단용)
+            log("beacon " + (parsed.query or "?"))
+            writer.write(resp(204, "No Content", b"", "text/plain", "Cache-Control: no-store\r\n"))
+            await writer.drain()
+            writer.close()
+            return
         if path == "/api/repos":
             body = json.dumps({"repos": list_repos(), "defaults": DEFAULT_REPOS,
                                "bundle": repo_bundle_summary(),
@@ -989,6 +1057,27 @@ async def handle(reader, writer):
         if partial or size > (1 << 20):
             log("static %s %d-%d/%d ua=%s" % (path, start, end, size, _ua))
 
+        # ---- ETag / Last-Modified (no-cache 재검증용) ----
+        #   검증자가 없으면 no-cache 가 매번 65MB 재다운로드가 된다.
+        try:
+            _mt = int(os.path.getmtime(full))
+        except OSError:
+            _mt = 0
+        _etag = 'W/"%x-%x%s"' % (size, _mt, "g" if use_gz else "")
+        _inm = (headers.get("if-none-match") or "").strip()
+        _ims = (headers.get("if-modified-since") or "").strip()
+        if not partial and method in ("GET", "HEAD") and (
+                (_inm and _inm == _etag) or
+                (not _inm and _ims and _ims == _email_date(_mt))):
+            writer.write(("HTTP/1.1 304 Not Modified\r\n"
+                          + "ETag: " + _etag + "\r\n"
+                          + "Last-Modified: " + _email_date(_mt) + "\r\n"
+                          + "Cache-Control: no-cache\r\n"
+                          + "Connection: close\r\n\r\n").encode())
+            await writer.drain()
+            writer.close()
+            return
+
         hdr = ("HTTP/1.1 " + ("206 Partial Content" if partial else "200 OK") + "\r\n"
                + "Content-Type: " + MIME.get(ext, "application/octet-stream") + "\r\n"
                + "Content-Length: " + str(length) + "\r\n"
@@ -996,6 +1085,8 @@ async def handle(reader, writer):
                + "Connection: close\r\n"
                + ("Content-Encoding: gzip\r\n" if use_gz else "")
                + "Vary: Accept-Encoding\r\n"
+               + "ETag: " + _etag + "\r\n"
+               + "Last-Modified: " + _email_date(_mt) + "\r\n"
                + "Cache-Control: no-cache\r\n")
         if partial:
             hdr += "Content-Range: bytes %d-%d/%d\r\n" % (start, end, size)

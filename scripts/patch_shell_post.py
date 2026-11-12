@@ -1,5 +1,6 @@
 import io
 import os
+import time
 import re
 
 CANDIDATES = [
@@ -559,6 +560,26 @@ window.addEventListener('unhandledrejection', function (e) {
   }
 
   /* 저장소(자동 업데이트) 번들 → MEMFS. 게임이 시작 전에 CDB/스크립트를 읽으므로 preRun 에서 적용한다. */
+  /* 저장소 탭(게임 내)에 보여줄 목록을 서버에서 받아 둔다(원본의 업데이터 UI 대응) */
+  function loadRepoInfo() {
+    try {
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', '/api/repos', false);
+      xhr.send(null);
+      if (xhr.status !== 200) return;
+      var j = JSON.parse(xhr.responseText);
+      var list = (j && j.repos) || [];
+      var out = [];
+      for (var i = 0; i < list.length; i++) {
+        var r = list[i];
+        var nm = (r.remote || '').replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '');
+        out.push({ name: nm || r.name, path: r.name, url: r.remote || '', files: r.files || 0, head: r.head || '' });
+      }
+      window.__repos = out;
+      console.log('[repo] info ' + out.length + ' repos');
+    } catch (e) { console.log('[repo] info fail ' + e); }
+  }
+
   function applyRepoBundle() {
     try {
       var xhr = new XMLHttpRequest();
@@ -615,6 +636,7 @@ window.addEventListener('unhandledrejection', function (e) {
         var ready = false;
         try { ready = FS.analyzePath('/config/system.conf').exists && FS.analyzePath('/media/Shaders').exists; } catch (e) {}
         if (ready || ++n > 1200) {
+          try { loadRepoInfo(); } catch (e) { console.log('[repo] info fail: ' + e); }
           try { applyRepoBundle(); } catch (e) { console.log('[repo] fail: ' + e); }
           try { restoreConfigOnly(); } catch (e) { console.log('[userdata] cfg restore fail: ' + e); }
           /* 덱/리플레이 복원도 preRun(=프리로드 완료 후, main 진입 전)에서 한다.
@@ -745,9 +767,13 @@ def _strip_injected(html):
     html = _re.sub(r"<style>\s*#edopro-load\{.*?</script>", "", html, flags=_re.S)
     html = _re.sub(r"<script>\s*/\* \?diag=1 이면.*?</script>", "", html, flags=_re.S)
     html = _re.sub(r"<script>/\*dpr1\*/.*?</script>", "", html, flags=_re.S)
+    html = _re.sub(r"<script>/\*buildtag\*/.*?</script>", "", html, flags=_re.S)
     html = _re.sub(r"<script>\s*/\*fs-btn\*/.*?</script>", "", html, flags=_re.S)
     html = _re.sub(r"<script>\s*/\*fs-start\*/.*?</script>", "", html, flags=_re.S)
     html = _re.sub(r"<script>\s*/\*fs-files\*/.*?</script>", "", html, flags=_re.S)
+    html = _re.sub(r"<script>\s*/\*fs-audio\*/.*?</script>", "", html, flags=_re.S)
+    html = _re.sub(r"<script>\s*/\*fs-ime\*/.*?</script>", "", html, flags=_re.S)
+    html = _re.sub(r"<script>\s*/\*fs-build\*/.*?</script>", "", html, flags=_re.S)
     html = _re.sub(r"<link[^>]*>\s*", "", html, count=0) if False else html
     return html
 
@@ -779,6 +805,28 @@ if 'name="viewport"' not in s:
     s = s.replace("</head>", META + "</head>", 1)
 else:
     s = re.sub(r'<meta name="viewport"[^>]*>', META, s, count=1)
+
+def _build_stamp():
+    """배포마다 바뀌는 스탬프(wasm mtime) — wasm/js/data 캐시 무효화에 쓴다."""
+    _c = os.path.expanduser("~/edo-src/wasm/web/edopro-full.wasm")
+    try:
+        if os.path.isfile(_c):
+            return str(int(os.path.getmtime(_c)))
+    except OSError:
+        pass
+    return str(int(time.time()))
+
+
+BUILD_STAMP = _build_stamp()
+
+EARLY2 = (
+    '<script>/*buildtag*/window.__edoproBuild="' + BUILD_STAMP + '";'
+    'window.Module=window.Module||{};'
+    'window.Module.locateFile=function(p){return p+"?v="+window.__edoproBuild;};'
+    '</script>'
+)
+if '/*buildtag*/' not in s:
+    s = s.replace("<head>", "<head>" + EARLY2, 1)
 
 # dpr 정규화(가장 먼저 실행): SDL(emscripten)과 셸이 같은 픽셀 단위를 쓰게 한다.
 EARLY = (
@@ -884,6 +932,141 @@ FS2 = r"""
 </script>
 """
 
+FS6 = r"""
+<script>
+/*fs-build*/
+(function () {
+  var b = window.__edoproBuild || 'dev';
+  try { console.log('[build] ' + b); } catch (e) {}
+  function badge() {
+    if (document.getElementById('edopro-build')) return;
+    var d = document.createElement('div');
+    d.id = 'edopro-build';
+    d.textContent = 'build ' + b;
+    d.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:100003;padding:2px 6px;border-radius:4px;'
+      + 'background:rgba(0,0,0,.55);color:#9fd0ff;font:11px monospace;pointer-events:none;opacity:.85';
+    document.body.appendChild(d);
+    setTimeout(function () { if (d && d.parentNode) d.style.display = 'none'; }, 20000);// build badge
+  try { var q = '?b=' + b + '&ime=' + (typeof window.__ime) + '&touch=' + (('ontouchstart' in window) || (navigator.maxTouchPoints > 0)) + '&ua=' + encodeURIComponent((navigator.userAgent||'').slice(0,40)); (navigator.sendBeacon ? navigator.sendBeacon('/api/beacon' + q) : fetch('/api/beacon' + q)); } catch (e) {}
+  }
+  setTimeout(badge, 1000);
+})();
+</script>
+"""
+if 'FS6 + "</body>"' not in s:
+    s = s.replace("</body>", FS6 + "</body>", 1)
+
+FS5 = r"""
+<script>
+/*fs-ime*/
+/* SDL2-emscripten 에 IME 가 없어 HTML 입력을 게임 편집박스에 연결한다.
+   - 게임이 편집박스를 포커스하면 Module.__edoproIME(1,...) 가 호출된다.
+   - 터치 기기에서는 화면 아래에 입력 필드를 띄워 한 번 탭으로 키보드를 연다. */
+(function () {
+  var el = null, active = false;
+  var MAP = { Backspace: 8, Enter: 13, Escape: 27, ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, Tab: 9, Delete: 46 };
+
+  function sendChar(cp) {
+    try {
+      document.dispatchEvent(new KeyboardEvent('keypress', {
+        charCode: cp, keyCode: cp, which: cp, key: String.fromCharCode(cp), bubbles: true, cancelable: true
+      }));
+    } catch (e) {}
+  }
+  function sendKey(kc) {
+    var name = '';
+    for (var k in MAP) { if (MAP[k] === kc) { name = k; break; } }
+    ['keydown', 'keyup'].forEach(function (t) {
+      try {
+        document.dispatchEvent(new KeyboardEvent(t, {
+          keyCode: kc, which: kc, key: name, bubbles: true, cancelable: true
+        }));
+      } catch (e) {}
+    });
+  }
+  function ensure() {
+    if (el) return el;
+    el = document.createElement('input');
+    el.id = 'edopro-ime';
+    el.type = 'text';
+    el.setAttribute('autocomplete', 'off');
+    el.setAttribute('autocapitalize', 'off');
+    el.setAttribute('autocorrect', 'off');
+    el.setAttribute('spellcheck', 'false');
+    el.placeholder = '\uC5EC\uAE30\uC5D0 \uC785\uB825';
+    el.style.cssText = [
+      'display:none', 'position:fixed', 'left:12px', 'bottom:10px',
+      'width:min(46vw,270px)', 'height:32px', 'z-index:100002', 'padding:0 10px',
+      'background:rgba(18,20,26,.94)', 'color:#e8eaf0', 'border:1px solid #569CD6',
+      'border-radius:8px', 'font:15px sans-serif', 'outline:none', 'box-shadow:0 2px 10px rgba(0,0,0,.5)'
+    ].join(';');
+    document.body.appendChild(el);
+
+    el.addEventListener('input', function () {
+      var t = el.value || '';
+      el.value = '';
+      for (var i = 0; i < t.length; i++) sendChar(t.charCodeAt(i));
+    });
+    el.addEventListener('keydown', function (e) {
+      var kc = MAP[e.key];
+      if (kc === undefined && e.keyCode) kc = e.keyCode;
+      if (kc === 8 || kc === 13 || kc === 27 || kc === 37 || kc === 38 || kc === 39 || kc === 40 || kc === 9 || kc === 46) {
+        sendKey(kc);
+        e.preventDefault();
+      }
+    });
+    return el;
+  }
+
+  var touch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0)
+    || /Android|iPhone|iPad|iPod|Mobile|DeX/i.test(navigator.userAgent || '');
+  window.__ime = function (on, x, y, w, h) {
+    var e = ensure();
+    if (!on) { active = false; try { e.blur(); } catch (er) {} e.style.setProperty('display', 'none', 'important'); return; }
+    active = true;
+    e.style.setProperty('display', 'block', 'important');
+    e.style.zIndex = '2147483647';
+    if (touch) {
+      try { e.focus(); } catch (er) {}
+    }
+  };
+})();
+</script>
+"""
+
+FS4 = r"""
+<script>
+/*fs-audio*/
+/* 브라우저 자동재생 정책: 첫 사용자 제스처에서 Web Audio 컨텍스트를 resume 한다 */
+(function () {
+  var unlocked = false;
+  function unlock() {
+    if (unlocked) return;
+    unlocked = true;
+    try {
+      if (window.miniaudio && window.miniaudio.devices) {
+        for (var i = 0; i < window.miniaudio.devices.length; i++) {
+          var d = window.miniaudio.devices[i];
+          if (d && d.webaudio && d.webaudio.state !== 'running') {
+            try { d.webaudio.resume(); } catch (e) {}
+          }
+        }
+      }
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) {
+        var a = new AC();
+        if (a.state !== 'running') a.resume();
+        setTimeout(function () { try { a.close(); } catch (e) {} }, 800);
+      }
+    } catch (e) {}
+  }
+  ['pointerdown', 'touchend', 'keydown', 'click'].forEach(function (t) {
+    document.addEventListener(t, unlock, { passive: true });
+  });
+})();
+</script>
+"""
+
 FS3 = r"""
 <script>
 /*fs-files*/
@@ -918,6 +1101,20 @@ if '/*fs-start*/' not in s:
 
 if '/*fs-files*/' not in s:
     s = s.replace("</body>", FS3 + "</body>", 1)
+
+if '/*fs-audio*/' not in s:
+    s = s.replace("</body>", FS4 + "</body>", 1)
+
+if '/*fs-ime*/' not in s:
+    s = s.replace("</body>", FS5 + "</body>", 1)
+
+if '/*fs-ime-boot*/' not in s:
+    s = s.replace("  function applyRepoBundle() {",
+                  "  /* 게임(irrlicht) 이 편집박스 포커스 시 호출 */\n"
+                  "  if (typeof Module !== 'undefined') Module['__edoproIME'] = function (on, x, y, w, h) {\n"
+                  "    try { if (window.__ime) window.__ime(on, x, y, w, h); } catch (e) {}\n"
+                  "  };\n\n"
+                  "  function applyRepoBundle() {", 1)
 
 s = s.replace("</head>", EDOPRO_JLOG + "</head>", 1)
 s = s.replace("<body>", "<body>" + EDOPRO_LOAD, 1)

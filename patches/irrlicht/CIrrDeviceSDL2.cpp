@@ -540,11 +540,28 @@ void CIrrDeviceSDL2::checkAndUpdateIMEState() {
 
 	SDL_StopTextInput();
 
-	if(!isEditingText)
+	if(!isEditingText) {
+#ifdef __EMSCRIPTEN__
+		/* 모바일 IME 브리지 종료 */
+		EM_ASM({ if (Module['__edoproIME']) Module['__edoproIME'](0, 0, 0, 0, 0); });
+#endif
 		return;
+	}
 
 	updateRectPosition();
 	SDL_StartTextInput();
+#ifdef __EMSCRIPTEN__
+	/* SDL2-emscripten 에는 IME 가 없으므로, HTML input 을 띄워 입력을 받는다 */
+	{
+		auto& _ul = lastFocusedElementPosition.UpperLeftCorner;
+		EM_ASM({
+			if (Module['__edoproIME'])
+				Module['__edoproIME'](1, $0, $1, $2, $3);
+		}, (int)(_ul.X / NativeScaleX), (int)(_ul.Y / NativeScaleY),
+		   (int)(lastFocusedElementPosition.getWidth() / NativeScaleX),
+		   (int)(lastFocusedElementPosition.getHeight() / NativeScaleY));
+	}
+#endif
 }
 
 int CIrrDeviceSDL2::appEventFilter(SDL_Event *event)
