@@ -125,6 +125,7 @@ MIME = {
 
 PIC_CACHE = os.environ.get("PIC_CACHE", "/app/piccache")
 KOREAN_CDB = os.environ.get("KOREAN_CDB", "/app/lang/korean/cards.cdb")
+ENG_STRINGS = os.environ.get("ENG_STRINGS", "/app/lang/english/strings.conf")
 MISS_TTL = int(os.environ.get("PIC_MISS_TTL", str(24 * 3600)))   # 이미지 404 캐시(초)
 LOCAL_PICS = os.environ.get("LOCAL_PICS", "/app/localpics")   # 사용자 EDOPro pics 오버레이(ro)
 
@@ -537,6 +538,16 @@ def build_repo_bundle(lang=""):
             log(f"bundle lang=korean (+{len(_kdata)/1048576:.1f}MB cdb)")
         except Exception as _e:
             log(f"bundle korean cdb fail: {_e}")
+    elif (not _korean) and os.path.isfile(ENG_STRINGS):
+        # 영어 선택 시 UI 문자열도 영어로 (기본 .data 는 한국어 strings.conf)
+        try:
+            with open(ENG_STRINGS, "rb") as _f:
+                _sdata = _f.read()
+            files["config/strings.conf"] = base64.b64encode(_sdata).decode()
+            total += len(_sdata)
+            log(f"bundle lang=english (strings {len(_sdata)}B)")
+        except Exception as _e:
+            log(f"bundle english strings fail: {_e}")
 
     body = json.dumps({"files": files, "count": len(files), "bytes": total}, ensure_ascii=False).encode()
     etag = '"' + hashlib.sha1(body).hexdigest() + '"'
