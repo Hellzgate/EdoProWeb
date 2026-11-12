@@ -282,22 +282,90 @@ window.addEventListener('unhandledrejection', function (e) {
   try { console.log('[js-reject] ' + ((e.reason && e.reason.stack) || e.reason)); } catch (x) {}
 });
 
-/* ===== 화면 맞춤 ===== */
+/* ===== 화면 맞춤 (v1.13.6: dpr=1 정규화 + 2x 렌더 + transform 표시) ===== */
 (function () {
+  /* SDL2(emscripten)은 리사이즈 이벤트를 CSS px 로 보내지만 캔버스 버퍼는 CSS×dpr 로 잡는다.
+     dpr 을 1로 고정하면 두 값이 같아져 회전 시에도 어긋나지 않는다(PC 와 동일 동작).
+     화질은 CSS 크기를 화면표시 크기의 SS 배로 잡고 transform 으로 축소해 확보한다. */
+  var REAL_DPR = window.__edoproRealDpr || window.devicePixelRatio || 1;
+  try {
+    Object.defineProperty(window, 'devicePixelRatio', { configurable: true, get: function () { return 1; } });
+  } catch (e) {}
+  var SS = Math.min(2, Math.max(1, REAL_DPR));   /* 폰:2, PC:1 */
+
   var BASE_W = 1024, BASE_H = 640;
+  var lastCss = '';
+  var sending = false;
+  var bootDone = false;
+  setTimeout(function () { bootDone = true; }, 12000);
+
+  function styleEl() {
+    var st = document.getElementById('edopro-fit');
+    if (!st) {
+      st = document.createElement('style');
+      st.id = 'edopro-fit';
+      (document.head || document.documentElement).appendChild(st);
+    }
+    return st;
+  }
+
+  /* 부팅 후에만 SDL 에 재통지(초기화 중 통지는 렌더러를 깨뜨린다) */
+  function sendResize() {
+    try {
+      sending = true;
+      window.dispatchEvent(new Event('resize'));
+    } catch (e) {}
+    setTimeout(function () { sending = false; }, 120);
+  }
+
   function fit() {
     var c = document.querySelector('canvas.emscripten') || document.querySelector('canvas');
     if (!c) return;
-    var W = window.innerWidth || document.documentElement.clientWidth;
-    var H = window.innerHeight || document.documentElement.clientHeight;
+    var W = document.documentElement.clientWidth || window.innerWidth || 0;
+    var H = document.documentElement.clientHeight || window.innerHeight || 0;
     if (!W || !H) return;
+
     var s = Math.min(W / BASE_W, H / BASE_H);
-    var w = Math.max(320, Math.floor(BASE_W * s));
-    var h = Math.max(200, Math.floor(BASE_H * s));
-    if (c.style.width !== w + 'px' || c.style.height !== h + 'px') {
-      c.style.width = w + 'px';
-      c.style.height = h + 'px';
+    if (!isFinite(s) || s <= 0) return;
+
+    /* 캔버스(=SDL 버퍼, CSS px) 는 표시 크기의 SS 배 */
+    var w = Math.max(200, Math.round(BASE_W * s * SS));
+    var h = Math.max(120, Math.round(BASE_H * s * SS));
+    var k = 1 / SS;
+    var x = Math.round((W - w * k) / 2);
+    var y = Math.round((H - h * k) / 2);
+
+    var css = 'canvas.emscripten{width:' + w + 'px!important;height:' + h + 'px!important;'
+      + 'position:fixed!important;left:0!important;top:0!important;margin:0!important;'
+      + 'transform-origin:0 0!important;transform:translate(' + x + 'px,' + y + 'px) scale(' + k + ')!important;'
+      + 'border:0!important;max-width:none!important;max-height:none!important}';
+    if (css !== lastCss) {
+      styleEl().textContent = css;
+      lastCss = css;
+      if (bootDone && location.search.indexOf('sync=0') < 0) sendResize();
     }
+
+    /* 계측(주의: getContext 호출 금지 — SDL 보다 먼저 컨텍스트를 잡으면 게임이 죽는다) */
+    try {
+      var cs2 = getComputedStyle(c);
+      var rc = c.getBoundingClientRect();
+      var vi = 'WxH ' + W + 'x' + H + '  dpr ' + REAL_DPR + '  ss ' + SS
+        + '  css ' + Math.round(parseFloat(cs2.width)) + 'x' + Math.round(parseFloat(cs2.height))
+        + '  rect ' + Math.round(rc.width) + 'x' + Math.round(rc.height)
+        + '  buf ' + c.width + 'x' + c.height;
+      if (vi !== window.__edoproViewStr) {
+        window.__edoproViewStr = vi;
+        try {
+          var hist = [];
+          try { hist = JSON.parse(localStorage.getItem('edopro-viewhist') || '[]'); } catch (e2) { hist = []; }
+          hist.push(vi);
+          if (hist.length > 12) hist = hist.slice(hist.length - 12);
+          localStorage.setItem('edopro-viewhist', JSON.stringify(hist));
+          localStorage.setItem('edopro-view', vi + '\n@ ' + new Date().toLocaleTimeString());
+        } catch (e) {}
+      }
+    } catch (e) {}
+
     var hintEl = document.getElementById('edopro-hint');
     if (!hintEl) {
       hintEl = document.createElement('div');
@@ -308,16 +376,37 @@ window.addEventListener('unhandledrejection', function (e) {
     var want = (H > W * 1.15) ? 'on' : '';
     if (hintEl.className !== want) hintEl.className = want;
   }
+
   window.__edoproFit = fit;
-  if (location.search.indexOf('nofit') >= 0) return;   /* 진단용: 화면 맞춤 비활성 */
-  window.addEventListener('resize', fit);
-  document.addEventListener('DOMContentLoaded', fit);
-  window.addEventListener('load', fit);
-  var n = 0;
-  var t = setInterval(function () { fit(); if (++n > 240) clearInterval(t); }, 250);
-  try {
-    new MutationObserver(fit).observe(document.body, { childList: true, subtree: true });
-  } catch (e) {}
+  if (location.search.indexOf('nofit') >= 0) return;
+
+  function burst() {
+    fit();
+    var d = [40, 120, 260, 500, 900, 1500];
+    for (var i = 0; i < d.length; i++) setTimeout(fit, d[i]);
+  }
+
+  /* 캡처 단계: 브라우저 resize 직후 SDL(버블)이 읽을 CSS 를 우리가 먼저 확정한다 */
+  window.addEventListener('resize', function () {
+    if (sending) return;
+    fit();
+  }, true);
+  window.addEventListener('resize', function () {
+    if (sending) return;
+    burst();
+  });
+  window.addEventListener('orientationchange', burst);
+  if (window.screen && screen.orientation && screen.orientation.addEventListener) {
+    screen.orientation.addEventListener('change', burst);
+  }
+  if (window.visualViewport && window.visualViewport.addEventListener) {
+    window.visualViewport.addEventListener('resize', burst);
+  }
+  document.addEventListener('visibilitychange', burst);
+  document.addEventListener('DOMContentLoaded', burst);
+  window.addEventListener('load', burst);
+  setInterval(fit, 500);
+  burst();
 })();
 
 /* ===== 덱/리플레이 보관(서버 /api/userdata) + 드래그&드롭 ===== */
@@ -644,6 +733,7 @@ def _strip_injected(html):
     html = _re.sub(r"<script>\s*/\* 브라우저 콘솔/오류를 서버.*?</script>", "", html, flags=_re.S)
     html = _re.sub(r"<style>\s*#edopro-load\{.*?</script>", "", html, flags=_re.S)
     html = _re.sub(r"<script>\s*/\* \?diag=1 이면.*?</script>", "", html, flags=_re.S)
+    html = _re.sub(r"<script>/\*dpr1\*/.*?</script>", "", html, flags=_re.S)
     html = _re.sub(r"<link[^>]*>\s*", "", html, count=0) if False else html
     return html
 
@@ -669,6 +759,18 @@ if start != -1:
 META = '<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">'
 if 'name="viewport"' not in s:
     s = s.replace("</head>", META + "</head>", 1)
+
+# dpr 정규화(가장 먼저 실행): SDL(emscripten)이 CSS px 로 리사이즈를 알리는데
+# Emscripten 셸은 캔버스 버퍼를 CSS*dpr 로 잡아 dpr>1 기기에서 게임이 1/dpr 만 그린다.
+EARLY = (
+    '<script>/*dpr1*/'
+    '(function(){try{window.__edoproRealDpr=window.devicePixelRatio||1;'
+    'Object.defineProperty(window,"devicePixelRatio",{configurable:true,get:function(){return 1;}});}'
+    'catch(e){}})();'
+    '</script>'
+)
+if '/*dpr1*/' not in s:
+    s = s.replace("<head>", "<head>" + EARLY, 1)
 
 if "</body>" in s:
     s = s.replace("</body>", BOOT + "</body>", 1)

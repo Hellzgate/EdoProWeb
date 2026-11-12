@@ -14,6 +14,7 @@ COPY web/bot.html /app/web/bot.html
 COPY web/webgltest.html /app/web/webgltest.html
 COPY web/probe.html /app/web/probe.html
 COPY web/probe2.html /app/web/probe2.html
+COPY web/view.html /app/web/view.html
 
 ENV PORT=8080 \
     ROOT=/app/web \

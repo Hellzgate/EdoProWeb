@@ -1,0 +1,32 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>view</title>
+<style>
+html,body{margin:0;background:#0b0d11;color:#e9edf5;font:15px/1.55 monospace}
+#a{padding:12px;white-space:pre-wrap;word-break:break-all}
+b{color:#7fd4ff}
+.h{color:#8b93a1}
+</style>
+<pre id="a">읽는 중…</pre>
+<script>
+(function () {
+  var el = document.getElementById('a');
+  function show() {
+    var lines = [];
+    var hist = [];
+    try { hist = JSON.parse(localStorage.getItem('edopro-viewhist') || '[]'); } catch (e) {}
+    lines.push('현재 페이지: ' + window.innerWidth + 'x' + window.innerHeight
+      + '  dpr ' + (window.devicePixelRatio || 1));
+    lines.push('======== 기록(오래된 → 최신) ========');
+    for (var i = 0; i < hist.length; i++) {
+      lines.push('[' + (i + 1) + '] ' + hist[i]);
+    }
+    if (!hist.length) lines.push('(기록 없음 — 게임 페이지를 먼저 열어 주세요)');
+    el.textContent = lines.join('\n');
+  }
+  show();
+  setInterval(show, 1500);
+  document.addEventListener('click', show);
+})();
+</script>
