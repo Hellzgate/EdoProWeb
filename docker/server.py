@@ -38,6 +38,20 @@ LOBBY_UPSTREAM = os.environ.get("LOBBY_UPSTREAM", "http://192.168.0.4:7922").rst
 # BRIDGE_FORCE=1 이면 BRIDGE_TARGET 으로 고정(기존 동작).
 BRIDGE_ALLOW_ANY = os.environ.get("BRIDGE_ALLOW_ANY", "1") == "1"
 BRIDGE_FORCE = os.environ.get("BRIDGE_FORCE", "0") == "1"
+# WS 브리지 화이트리스트(비우면 제한 없음). 예: BRIDGE_ALLOW_HOSTS=192.168.0.4,127.0.0.1
+#                                         BRIDGE_ALLOW_PORTS=7911-7914,7922
+BRIDGE_ALLOW_HOSTS = [h.strip() for h in os.environ.get("BRIDGE_ALLOW_HOSTS", "").split(",") if h.strip()]
+BRIDGE_ALLOW_PORTS = []
+for _tok in os.environ.get("BRIDGE_ALLOW_PORTS", "").split(","):
+    _tok = _tok.strip()
+    if not _tok:
+        continue
+    if "-" in _tok:
+        _a, _b = _tok.split("-", 1)
+        if _a.isdigit() and _b.isdigit():
+            BRIDGE_ALLOW_PORTS.extend(range(int(_a), int(_b) + 1))
+    elif _tok.isdigit():
+        BRIDGE_ALLOW_PORTS.append(int(_tok))
 LOBBY_ALLOW_ANY = os.environ.get("LOBBY_ALLOW_ANY", "1") == "1"
 # 봇 투입(멀티롤 웹 패널 API) — 없으면 봇 기능 비활성
 BOT_PANEL_URL = os.environ.get("BOT_PANEL_URL", "").rstrip("/")
@@ -332,7 +346,10 @@ def build_repo_bundle():
 
     - *.cdb                -> expansions/<repo>__<이름>.cdb
     - *.lua (script 등)    -> script/<repo>/<파일명>.lua   (한 단계 폴더만 스캔되므로 평탄화)
-    - *.conf (lflist)      -> lflists/<repo>__<이름>.conf
+    - strings.conf         -> config/strings.conf (한국어 UI)
+    - *.conf (그 외)        -> lflists/<repo>__<이름>.conf
+    - 퍼즐 리포의 *.lua     -> puzzles/<이름>.lua
+    - pics/ 의 jpg,png      -> pics/[field|cover/]<이름>
     """
     key = _repo_state_key()
     if _bundle_cache["key"] == key and _bundle_cache["json"] is not None:
@@ -354,12 +371,30 @@ def build_repo_bundle():
                     rel = os.path.relpath(full, repo_dir).replace(os.sep, "/")
                     if rel.startswith(".git/") or "/.git/" in rel:
                         continue
+                    rel_l = rel.lower()
+                    repo_l = repo.lower()
+                    is_puzzle = ("puzzle" in repo_l) or rel_l.startswith("puzzles/") or "/puzzle" in rel_l
+                    is_pic = ("pics/" in rel_l) or rel_l.startswith("pics") or ("pics" in repo_l)
                     if low.endswith(".cdb"):
                         dest = f"expansions/{safe_repo}__{name}"
-                    elif low.endswith(".lua"):
-                        dest = f"script/{safe_repo}/{name}"
+                    elif low == "strings.conf":
+                        # 기본 자산(.data)에 이미 한국어 UTF-8 strings.conf 를 넣어 두었으므로
+                        # 저장소의 (부분/다른 인코딩) strings.conf 로 덮어쓰지 않는다.
+                        continue
                     elif low.endswith(".conf"):
                         dest = f"lflists/{safe_repo}__{name}"
+                    elif low.endswith(".lua") and is_puzzle:
+                        # 퍼즐 리포(ProjectIgnis/Puzzles 등)는 puzzles/ 로
+                        dest = f"puzzles/{name}"
+                    elif low.endswith(".lua"):
+                        dest = f"script/{safe_repo}/{name}"
+                    elif low.endswith((".jpg", ".jpeg", ".png")) and is_pic:
+                        if "pics/field/" in rel_l:
+                            dest = f"pics/field/{name}"
+                        elif "pics/cover/" in rel_l:
+                            dest = f"pics/cover/{name}"
+                        else:
+                            dest = f"pics/{name}"
                     else:
                         continue
                     try:
@@ -658,6 +693,18 @@ async def handle(reader, writer):
                 host = h
                 if p.isdigit():
                     port = int(p)
+            if BRIDGE_ALLOW_HOSTS and host not in BRIDGE_ALLOW_HOSTS:
+                log(f"ws deny host={host}")
+                writer.write(resp(403, "Forbidden"))
+                await writer.drain()
+                writer.close()
+                return
+            if BRIDGE_ALLOW_PORTS and port not in BRIDGE_ALLOW_PORTS:
+                log(f"ws deny port={port}")
+                writer.write(resp(403, "Forbidden"))
+                await writer.drain()
+                writer.close()
+                return
             if not _valid_host(host) or not (1 <= port <= 65535):
                 log(f"ws reject host={host!r} port={port}")
                 writer.write(resp(400, "Bad Request"))
@@ -825,6 +872,18 @@ async def handle(reader, writer):
                 await writer.drain()
                 writer.close()
                 return
+            # 부팅 시 30~40MB JSON → gzip(약 1/4). 브라우저 XHR 이 자동 해제한다.
+            if "gzip" in (headers.get("accept-encoding") or "").lower() and len(body) > 65536:
+                try:
+                    import gzip as _gzip
+                    body = _gzip.compress(body, 6)
+                    writer.write(resp(200, "OK", body, "application/json; charset=utf-8",
+                                      f"ETag: {etag}\r\nContent-Encoding: gzip\r\nCache-Control: no-cache\r\n"))
+                    await writer.drain()
+                    writer.close()
+                    return
+                except Exception:
+                    pass
             writer.write(resp(200, "OK", body, "application/json; charset=utf-8",
                               f"ETag: {etag}\r\nCache-Control: no-cache\r\n"))
             await writer.drain()

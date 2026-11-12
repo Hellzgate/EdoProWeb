@@ -44,6 +44,11 @@ CSS = (
     "#edopro-start button{font:700 26px 'Malgun Gothic',sans-serif;padding:20px 34px;border-radius:12px;"
     "border:1px solid #3f6fd8;background:linear-gradient(180deg,#3b72e0,#2a55b0);color:#fff;cursor:pointer}"
     "#edopro-start button:active{filter:brightness(1.15)}"
+    "#edopro-files{display:flex!important;position:fixed!important;right:62px;top:10px;"
+    "width:44px;height:44px;border-radius:22px;border:1px solid rgba(255,255,255,.35);"
+    "background:rgba(20,22,28,.55);color:#e8eaf0;font:20px/1 sans-serif;"
+    "align-items:center;justify-content:center;text-decoration:none;z-index:100000}"
+    "#edopro-files:active{background:rgba(80,140,255,.65)}"
     "#edopro-fs{display:block!important;position:fixed!important;right:10px;top:10px;"
     "width:44px;height:44px;border-radius:22px;border:1px solid rgba(255,255,255,.35);"
     "background:rgba(20,22,28,.55);color:#e8eaf0;font:20px/1 sans-serif;padding:0;"
@@ -742,6 +747,7 @@ def _strip_injected(html):
     html = _re.sub(r"<script>/\*dpr1\*/.*?</script>", "", html, flags=_re.S)
     html = _re.sub(r"<script>\s*/\*fs-btn\*/.*?</script>", "", html, flags=_re.S)
     html = _re.sub(r"<script>\s*/\*fs-start\*/.*?</script>", "", html, flags=_re.S)
+    html = _re.sub(r"<script>\s*/\*fs-files\*/.*?</script>", "", html, flags=_re.S)
     html = _re.sub(r"<link[^>]*>\s*", "", html, count=0) if False else html
     return html
 
@@ -878,6 +884,27 @@ FS2 = r"""
 </script>
 """
 
+FS3 = r"""
+<script>
+/*fs-files*/
+/* 모바일에서도 덱/리플레이 파일을 올리고 내려받을 수 있게 /files.html 로 가는 버튼 */
+(function () {
+  function mk() {
+    if (document.getElementById('edopro-files')) return;
+    var a = document.createElement('a');
+    a.id = 'edopro-files';
+    a.href = '/files.html';
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.title = '\uB371 / \uB9AC\uD50C\uB808\uC774 \uD30C\uC77C (\uC5C5\uB85C\uB4DC\u00B7\uB2E4\uC6B4\uB85C\uB4DC)';
+    a.textContent = '\uD83D\uDCC1';
+    document.body.appendChild(a);
+  }
+  if (document.body) mk(); else document.addEventListener('DOMContentLoaded', mk);
+})();
+</script>
+"""
+
 if "</body>" in s:
     s = s.replace("</body>", BOOT + "</body>", 1)
 else:
@@ -888,6 +915,9 @@ if '/*fs-btn*/' not in s:
 
 if '/*fs-start*/' not in s:
     s = s.replace("</body>", FS2 + "</body>", 1)
+
+if '/*fs-files*/' not in s:
+    s = s.replace("</body>", FS3 + "</body>", 1)
 
 s = s.replace("</head>", EDOPRO_JLOG + "</head>", 1)
 s = s.replace("<body>", "<body>" + EDOPRO_LOAD, 1)

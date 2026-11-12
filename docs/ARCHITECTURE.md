@@ -1,68 +1,122 @@
-# 아키텍처
+# EDOPro Web — 아키텍처 / 모듈 지도
 
-## 1. 구성 요소
+- 버전: **1.16.7** (이미지 `edopro-web:1.16.7`)
+- 구성: **브라우저(wasm) + 정적·중계 서버(Python asyncio) + DSM HTTPS 역프록시**
+- 원본: Project Ignis EDOPro 41.0.2 (gframe + irrlicht + ocgcore) / SDL2 2.32.10 / emscripten
 
-| 계층 | 구성 | 역할 |
+```
+[브라우저]  edopro-full.html + .js + .wasm + .data
+   │  HTTPS (신뢰 인증서)                    ← DSM 역프록시 8451 → 192.168.0.53:7556
+   ├─ /ws?host=&port=      ── WebSocket ⇄ TCP 브리지 ──▶ 게임서버(멀티롤 7911/7912/7914)
+   ├─ /img/<id>.jpg        ── 카드/필드/커버 이미지 프록시(디스크 캐시) ──▶ ygoprodeck
+   ├─ /api/repos(+sync/tar/bundle) ── git 저장소 동기화(카드DB·금제·스크립트)
+   ├─ /api/userdata        ── 덱·리플레이·퍼즐·system.conf 보관(볼륨)
+   ├─ /api/getrooms, /api/bot/* ── 로비/봇 패널 연동
+   └─ /manifest.json, /icon-*.png ── PWA(전체화면·가로)
+```
+
+---
+
+## 1. 저장소 파일 지도
+
+| 경로 | 모듈 | 책임 |
 |---|---|---|
-| 브라우저 | `edopro-full.html/.js/.wasm/.data` | EDOPro 클라이언트 (wasm) + WebGL1 렌더 |
-| 셸(HTML) | 페이지 스코프 JS | 게임 캔버스만 표시, WS 주소 주입, 카드 이미지 헬퍼 |
-| 컨테이너 | `server.py` | 정적 서빙(COOP/COEP) + **WS↔TCP 브리지**(`/ws`) + **Git 동기화 API** |
-| 서버(게임) | Multirole 7911 / 머큐리 프론트 7914 (NAS) | 듀얼 처리·로비·리플레이 |
+| `docker/server.py` | **서버(단일 파일, 7개 논리 모듈)** | 아래 §2 |
+| `docker/app/` | (분리 예정/없음) | 현재는 server.py 내부 섹션으로 구분 |
+| `docker/Dockerfile` | 이미지 | nginx 없이 python asyncio 로 직접 서빙 + `.gz` 사전 압축 |
+| `scripts/patch_shell_post.py` | **셸 주입기** | emscripten HTML 에 CSS/JS 를 삽입(멱등) |
+| `scripts/build-irrlicht.sh` | 빌드 | irrlicht 전체 오브젝트(`irr-emcc/obj`) |
+| `scripts/build-gframe-audio.sh` | 빌드 | gframe 오브젝트(`gframe-emcc3/obj`) — `repo_manager.cpp`, `image_downloader.cpp` 제외 |
+| `scripts/link-default.sh` | 링크 | wasm/html/data 생성 + `.gz` + postprocess 호출 |
+| `scripts/rebuild-one.sh` | 빌드 | 단일 gframe .cpp 재컴파일 |
+| `scripts/rebuild_irr_one.sh` | 빌드 | 단일 irrlicht .cpp 재컴파일 + 링크 + 이미지 |
+| `scripts/rebuild_game_opt.sh` | 빌드 | `game.cpp` 만 `-O0`(모바일 크래시 회피) |
+| `scripts/init_probe.sh` | 진단 | `Game::Initialize()` N단계 조기 return 이분탐색(별도 컨테이너) |
+| `scripts/patch_*.py` | 소스 패치 | irrlicht/SDL/gframe 패치(멱등) |
+| `scripts/web_stubs.cpp` | 스텁 | `RepoManager` 무력화(웹은 서버가 git 대행) |
+| `scripts/tls/` | TLS(B안) | 미니PC nginx 로 TLS 종단할 때 사용 |
+| `web/*.html` | 보조 페이지 | `last.html`(로그), `view.html`(해상도), `repos.html`(저장소), `bot.html` |
+| `patches/` | 참고 스냅샷 | irrlicht/EDOPro 소스 스냅샷 + 통합 patch |
+| `docs/` | 문서 | 본 문서 포함 16편 |
+| `deps/` | shim | `curl-stub`(전 함수 실패), `libevent-lite`, `emscripten-shim` |
 
-## 2. 데이터 흐름
+빌드 산출물(`edopro-full.*`, `release/`)은 `.gitignore` 로 제외.
 
-### 2-1. 실행(부팅)
+---
+
+## 2. 서버 모듈 (`docker/server.py`, 1,003줄)
+
+| # | 모듈(섹션) | 주요 함수 | 노출 경로 |
+|---|---|---|---|
+| M1 | **설정/유틸** | 환경변수, `MIME`, `log()`, `resp()`, `read_head()` | — |
+| M2 | **정적 파일** | gzip 사전압축 선택, Range 지원, COOP/COEP 헤더 | `/`, `/edopro-full.*`, `*.html` |
+| M3 | **이미지** | `_safe_pic()`, `fetch_image()` (디스크 캐시) | `/img/<id>.jpg`, `/img/field/…`, `/img/cover/…` |
+| M4 | **사용자 데이터** | `load_userdata()`, `save_userdata()`, `_ud_read_file()`, `_ud_write_file()`, `_file_kind()`, `render_files_page()` | `/api/userdata`, `/api/userdata/file`, `/files.html` |
+| M5 | **저장소(git)** | `sync_repo()`, `list_repos()`, `build_repo_bundle()`, `make_tar()`, `auto_sync_repos()`, `repo_bundle_summary()` | `/api/repos`, `/api/repos/sync`, `/api/repos.tar`, `/api/repos/bundle` |
+| M6 | **WS 브리지** | `ws_frame()`, `read_ws_frame()`, `ws_bridge()`, `_valid_host()` | `/ws` |
+| M7 | **로비/봇** | `fetch_lobby_rooms()`, `_bot_request()` | `/api/getrooms`, `/api/bot/*` |
+| — | **HTTP 라우터** | `handle()` / `main()` (TLS 8443 + HTTP 8080 동시) | 전체 |
+
+### 환경변수
+| 키 | 기본 | 의미 |
+|---|---|---|
+| `PORT` / `ROOT` | 8080 / `/app/web` | HTTP 포트 / 정적 루트 |
+| `HTTPS_PORT` / `CERT_DIR` | 8443 / `/app/cert` | 자체서명 TLS |
+| `REPOS` | `ProjectIgnis/BabelCDB` | 기본 동기화 저장소(쉼표) |
+| `REPOS_AUTO_HOURS` | 0(off) | 자동 동기화 주기 |
+| `BRIDGE_TARGET` / `BRIDGE_ALLOW_ANY` / `BRIDGE_FORCE` | — / 1 / 0 | WS 중계 정책 |
+| `LOBBY_UPSTREAM` / `LOBBY_ALLOW_ANY` | `http://192.168.0.4:7922` / 1 | 방 목록 프록시 |
+| `BOT_PANEL_URL` / `BOT_PANEL_TOKEN` | — | 멀티롤 봇 패널 |
+| `USERDATA_DIR` | `/app/userdata` | 덱/리플레이 볼륨 |
+
+---
+
+## 3. 셸 주입 모듈 (`scripts/patch_shell_post.py`)
+
+| # | 블록(주석 마커) | 책임 |
+|---|---|---|
+| S1 | `CSS` | 페이지 레이아웃(16:10·검은 배경), 토스트, 로딩 오버레이, ⛶ 버튼, 시작 오버레이 스타일 |
+| S2 | `EDOPRO_JLOG` | 콘솔/오류 → localStorage 이력(40건) + `?jlogsync=1`(서버 전송) |
+| S3 | `EDOPRO_LOAD` | 로딩 UI(진행률), 부팅 판정(`canvas.width > 320`) |
+| S4 | `DIAG` | `?diag=1` 좌상단 진단 패널 |
+| S5 | `BOOT` | ①화면 맞춤(`fit`) ②덱/리플레이 동기화(`/api/userdata`) ③레포 번들 적용 ④드래그&드롭 |
+| S6 | `FS` | 우상단 ⛶ 전체화면 토글 |
+| S7 | `FS2` | 로딩 시 1탭 시작 오버레이(가로 전용·12초 자동 해제) |
+| — | `_strip_injected()` | 재실행 시 이전 주입 제거(멱등) |
+
+**주입 규칙**: `</head>` 앞 CSS/meta, `<head>` 직후 dpr=1 스크립트(가장 먼저), `</body>` 앞 JS 블록들.
+
+---
+
+## 4. 네이티브 소스 패치 (재현용)
+
+| 파일 | 패치 | 이유 |
+|---|---|---|
+| `gframe/utils_gui.cpp` | `getDefaultDriver()` **맨 앞**에 `#ifdef __EMSCRIPTEN__ → EDT_WEBGL1` | `EDOPRO_LINUX` 분기가 먼저 걸려 OpenGL(미컴파일) 선택 → 검은 화면 |
+| `irrlicht/src/CIrrDeviceSDL2.cpp` | 캔버스 **버퍼 크기** 사용 + `SDL_WINDOWEVENT_RESIZED` 처리 | SDL 은 CSS px, 버퍼는 CSS×dpr |
+| `gframe/image_manager.cpp` | `web_fetch_pic()` — `/img/…` **동기 XHR** → MEMFS | libcurl 스텁 |
+| `gframe/game.cpp` | `[WEBSTEP]/[WEBFLOW]` 로그, `-O0` 컴파일 | 모바일 V8 거대함수 크래시 |
+| `deps/curl-stub/curlstub.c` | 전 함수 실패 반환 | 링크용 |
+
+---
+
+## 5. 데이터 흐름
+
+1. **부팅**: HTML → `Module` 초기화 → `/api/repos/bundle`(12MB) 풀기 → `/api/userdata` 복원 → `preRun`(덱/리플레이) → 메인 루프
+2. **카드 이미지**: 렌더 중 `web_fetch_pic(code)` → `GET /img/<code>.jpg` → 서버 디스크 캐시(없으면 ygoprodeck) → MEMFS `/pics`
+3. **대전**: 게임의 네트워크 → `wss://…/ws?host=&port=` → 서버가 TCP 연결 → 멀티롤(7911/7914)
+4. **저장**: 20초/종료 시 `/deck`,`/replay`,`/puzzles`,`config/system.conf` → `/api/userdata`(볼륨)
+5. **업데이트**: 서버가 git 동기화(6시간) → `/expansions`·`/script`·`/lflists` 번들 → 재접속 시 반영
+
+---
+
+## 6. 검증 명령
+
+```bash
+curl -sI  http://127.0.0.1:7556/                    # 200
+curl -s   -o /dev/null -w "%{http_code} %{size_download}\n" --compressed http://127.0.0.1:7556/edopro-full.data
+curl -s -i -N --max-time 5 --http1.1 -H "Connection: Upgrade" -H "Upgrade: websocket" \
+     -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" -H "Sec-WebSocket-Version: 13" \
+     "http://127.0.0.1:7556/ws?host=192.168.0.4&port=7911" | head -1     # 101
 ```
-브라우저 GET /  ─▶ server.py ─▶ edopro-full.html
-                  └▶ .js/.wasm/.data (preload: config·fonts·textures·skin·expansions·lflists·deck·script·media)
-Module.preRun? (없음)  ─▶ EDOPro main()
-   └ DataHandler: config/system.conf, expansions/*.cdb(한국어), repositories/ 스캔
-   └ Game::Initialize: Irrlicht WEBGL1 디바이스 + SDL2 창
-   └ Game::MainLoop: 프레임 루프 (Asyncify 로 프레임마다 브라우저에 양보)
-```
-
-### 2-2. 서버 접속
-```
-게임 UI(LAN + AI) → DuelClient::StartClient(ip, port)
-   └ evlite.c: bufferevent_socket_connect → ws://<host>/ws?host=<ip>&port=<port>
-        └ server.py /ws : WebSocket 프레임 ↔ TCP 바이트 중계 (BRIDGE_TARGET 로 대상 고정 가능)
-   └ 메인 루프에서 DuelClient::PumpWeb() 이 to_analyze 큐를 소비 → STOC 처리
-```
-
-### 2-3. 저장소(깃) 적용
-```
-/repos.html → POST /api/repos/sync {repos:["owner/name"]}
-   └ server.py: git clone --depth 1 / fetch+reset → /app/repos/<owner>_<name>
-게임 새로고침 시 → GET /api/repos.tar
-   └ (구) preRun 에서 tar 해제 → MEMFS repositories/
-   ※ 현재는 tar 마운트를 사용하지 않는다(부팅 안정성). 저장소 파일은 서버가 보관·관리한다.
-```
-
-## 3. 스레드/이벤트 모델
-
-- wasm 런타임은 **단일 스레드**(`-sASYNCIFY`). 브라우저에 양보는 `emscripten_sleep` 로 처리.
-- EDOPro 는 원래 `ClientThread`/`ParserThread` 두 스레드를 쓰지만,
-  wasm 빌드에서는 **메인 루프 펌프(`DuelClient::PumpWeb`)** 로 대체했다.
-- WebSocket 콜백은 브라우저 이벤트로 메인 스레드에서 실행되고, 큐에 쌓인 STOC 패킷을 `PumpWeb` 이 처리한다.
-
-## 4. 컨텍스트(WebGL) 관리
-
-브라우저는 캔버스당 WebGL 컨텍스트 1개만 허용한다. EDOPro 는 데이터 로딩용 **임시 디바이스**를 만들기 때문에
-그대로 두면 뒤에 만든 쪽이 앞의 컨텍스트를 잃는다 → `CSDL2ContextManager` 를 emscripten 전용으로 수정:
-
-- `generateContext()` : 첫 컨텍스트를 **static 으로 보관**하고 이후 요청은 재사용
-- `destroyContext()` : emscripten 에서 **무시**
-- `~CIrrDeviceSDL2` : `SDL_DestroyWindow`/`SDL_Quit` 생략(창·컨텍스트는 페이지 수명)
-
-## 5. 자산(Asset) 전략
-
-| 자산 | 방법 |
-|---|---|
-| config/fonts/textures/skin/expansions/lflists/deck/script/media | **preload** 로 `.data` 에 포함(약 80MB) |
-| 카드 이미지(pics) | 서버 프록시 `/img/<id>.jpg` (업스트림 images.ygoprodeck.com, `/app/piccache` 볼륨 캐시) |
-| Git 저장소(cdb/스크립트 확장) | 서버 clone + `/api/repos.tar` |
-
-## 6. 왜 "그대로 복사"가 아니라 wasm 인가
-
-`.exe`/ELF 를 브라우저가 실행할 수 없으므로, **같은 소스(41.0.2)** 를 Emscripten 으로 다시 컴파일했다.
-렌더러는 Irrlicht 포크에 이미 있는 **`EDT_WEBGL1` 드라이버**(WebGL1 ⊂ GLES2)를 사용한다.
+브라우저 진단: `/last.html`(로그), `/view.html`(해상도), `/repos.html`(저장소), `?diag=1`, `?nofit=1`, `?sync=0`.

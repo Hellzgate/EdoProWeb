@@ -53,6 +53,9 @@ namespace irr
 {
 
 //! constructor
+// 전방 선언 (파일 하단 정의)
+static void EDO_GetCanvasBufferSize(int *w, int *h);
+
 CIrrDeviceSDL2::CIrrDeviceSDL2(const SIrrlichtCreationParameters& param)
 	: CIrrDeviceStub(param),
 	window((decltype(window))param.WindowId),
@@ -150,6 +153,12 @@ CIrrDeviceSDL2::CIrrDeviceSDL2(const SIrrlichtCreationParameters& param)
 		updateNativeScale();
 		int new_width, new_height;
 		SDL_GL_GetDrawableSize(window, &new_width, &new_height);
+		{
+			int bw = 0, bh = 0;
+			EDO_GetCanvasBufferSize(&bw, &bh);
+			if (bw > 0 && bh > 0) { new_width = bw; new_height = bh; }
+			fprintf(stderr, "[irr] create size -> %dx%d (sdl %dx%d)\n", new_width, new_height, bw, bh);
+		}
 		if(new_width != Width || new_height != Height) {
 			Width = new_width;
 			Height = new_height;
@@ -573,6 +582,18 @@ int CIrrDeviceSDL2::appEventFilter(SDL_Event *event)
 	return 0;
 }
 
+
+// SDL2(emscripten)은 window->w 기준(CSS px)으로 크기를 알리지만 실제 WebGL 버퍼는
+// 셸이 CSS*dpr 로 잡는다. irrlicht 뷰포트를 버퍼와 일치시키기 위해 캔버스 속성 크기를 읽는다.
+static void EDO_GetCanvasBufferSize(int *w, int *h)
+{
+	*w = 0; *h = 0;
+#ifdef __EMSCRIPTEN__
+	emscripten_get_canvas_element_size("#canvas", w, h);
+#endif
+	if (*w <= 0 || *h <= 0) { *w = 0; *h = 0; }
+}
+
 void CIrrDeviceSDL2::updateNativeScale()
 {
 	int width, height = 0;
@@ -587,6 +608,8 @@ void CIrrDeviceSDL2::updateNativeScale()
 	}
 	NativeScaleX = (f32)real_width / (f32)width;
 	NativeScaleY = (f32)real_height / (f32)height;
+	fprintf(stderr, "[irr] nativeScale win=%dx%d drawable=%dx%d ratio=%.3f\n",
+		width, height, real_width, real_height, (double)NativeScaleX);
 }
 
 //! runs the device. Returns false if device wants to be deleted
@@ -883,10 +906,19 @@ bool CIrrDeviceSDL2::run()
 				case SDL_WINDOWEVENT_FOCUS_LOST:
 					WindowHasFocus = false;
 					break;
+				case SDL_WINDOWEVENT_RESIZED:   /* SDL2(emscripten)는 CSS 리사이즈를 RESIZED 로만 보낸다 */
 				case SDL_WINDOWEVENT_SIZE_CHANGED: {
 					updateNativeScale();
 					u32 new_width = SDL_event.window.data1 * NativeScaleX;
 					u32 new_height = SDL_event.window.data2 * NativeScaleY;
+					{
+						int bw = 0, bh = 0;
+						EDO_GetCanvasBufferSize(&bw, &bh);
+						if (bw > 0 && bh > 0) { new_width = (u32)bw; new_height = (u32)bh; }
+					}
+					fprintf(stderr, "[irr] resize ev=%d data=%dx%d -> %ux%u (was %ux%u)\n",
+						(int)SDL_event.window.event, SDL_event.window.data1, SDL_event.window.data2,
+						new_width, new_height, (unsigned)Width, (unsigned)Height);
 					if(new_width != Width || new_height != Height) {
 						Width = new_width;
 						Height = new_height;
