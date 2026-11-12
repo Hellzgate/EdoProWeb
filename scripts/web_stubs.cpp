@@ -71,8 +71,17 @@ std::vector<const GitRepo*> RepoManager::GetAllRepos() const {
 }
 
 std::vector<const GitRepo*> RepoManager::GetReadyRepos() {
+	/* IMPORTANT: EDOPro 는 메인 루프(Draw)에서 매 프레임
+	   ParseGithubRepositories(GetReadyRepos()) 를 호출한다.
+	   여기서 항상 목록을 돌려주면 매 프레임 lflist 재파싱 + 금제 목록 누적(수천 개)이
+	   발생해 게임이 매우 느려지고 금제 콤보가 깨진다.
+	   → 최초 1회만 돌려주고 이후에는 빈 목록(파싱/갱신은 서버가 담당). */
 	loadReposOnce();
+	static bool consumed_once = false;
 	std::vector<const GitRepo*> out;
+	if (consumed_once)
+		return out;
+	consumed_once = true;
 	for (auto& r : g_repos) {
 		out.push_back(&r);
 	}
