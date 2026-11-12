@@ -48,6 +48,8 @@ irr::s32 toPow2(irr::video::IVideoDriver* driver, irr::s32 size) {
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #include <set>
+#include <map>
+#include <chrono>
 
 /* [web] 카드 이미지를 서버에서 받아 MEMFS 에 저장한다.
    - 비동기(fetch 후 다음 프레임) 방식은 EDOPro 의 preload 상태기계와 맞물려 재시도가 되지 않아
@@ -64,13 +66,21 @@ static int web_fetch_pic(int code, int type) {
 			try { fs.mkdirTree(dir); } catch (e) {}
 			var url = ($1 === 1) ? ('/img/field/' + $0 + '.jpg')
 			        : (($1 === 2) ? ('/img/cover/' + $0 + '.jpg') : ('/img/' + $0 + '.jpg'));
+			/* 실패한 카드는 이번 세션에서 다시 묻지 않는다(목록 수천 장일 때 폭주 방지) */
+			window.__picFail = window.__picFail || {};
+			if (window.__picFail[$0 + ':' + $1]) return 0;
+			/* 동기 요청 예산: 200ms 동안 최대 12장 → UI 가 멈추지 않고 순차 로딩 */
+			var _now = Date.now();
+			if (!window.__picWin || _now - window.__picWin > 16) { window.__picWin = _now; window.__picBudget = (window.__picMax || 2); }
+			if (window.__picBudget <= 0) return 0;
+			window.__picBudget--;
 			var xhr = new XMLHttpRequest();
 			xhr.open('GET', url, false);
 			xhr.overrideMimeType('text/plain; charset=x-user-defined');
 			xhr.send(null);
-			if (xhr.status !== 200) return 0;
+			if (xhr.status !== 200) { window.__picFail[$0 + ':' + $1] = 1; return 0; }
 			var txt = xhr.responseText || '';
-			if (txt.length < 800) return 0;
+			if (txt.length < 800) { window.__picFail[$0 + ':' + $1] = 1; return 0; }
 			var arr = new Uint8Array(txt.length);
 			for (var i = 0; i < txt.length; i++) arr[i] = txt.charCodeAt(i) & 0xff;
 			fs.writeFile(path, arr);
@@ -119,15 +129,28 @@ void ImageManager::PrefetchCard(uint32_t code) {
 	web_pic_start((int)code, 0);
 }
 
+static uint32_t web_now_ms() {
+	using namespace std::chrono;
+	return (uint32_t)duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+}
+
 static bool WebFetchCardImage(uint32_t code, int type) {
 	static std::set<uint32_t> done[3];
+	static std::map<uint32_t, uint32_t> fail_time[3];   /* code -> 마지막 실패 시각(ms) */
 	int idx = (type == 1) ? 1 : ((type == 2) ? 2 : 0);
 	if(done[idx].count(code))
 		return false;
+	auto it = fail_time[idx].find(code);
+	if(it != fail_time[idx].end()) {
+		if(web_now_ms() - it->second < 60000)
+			return false;                 /* 60초 동안은 재시도하지 않는다 */
+		fail_time[idx].erase(it);
+	}
 	if(web_fetch_pic((int)code, idx) != 0) {
 		done[idx].insert(code);
 		return true;
 	}
+	fail_time[idx][code] = web_now_ms();
 	return false;
 }
 #endif

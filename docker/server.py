@@ -25,6 +25,7 @@ import posixpath
 import re
 import subprocess
 import tarfile
+import time
 import urllib.parse
 
 def _email_date(ts):
@@ -123,6 +124,9 @@ MIME = {
 
 
 PIC_CACHE = os.environ.get("PIC_CACHE", "/app/piccache")
+KOREAN_CDB = os.environ.get("KOREAN_CDB", "/app/lang/korean/cards.cdb")
+MISS_TTL = int(os.environ.get("PIC_MISS_TTL", str(24 * 3600)))   # 이미지 404 캐시(초)
+
 PIC_UPSTREAM = [
     "https://images.ygoprodeck.com/images/cards/{}",
     "https://images.ygoprodeck.com/images/cards_small/{}",
@@ -148,6 +152,17 @@ def fetch_image(rel):
     if os.path.isfile(cached) and os.path.getsize(cached) > 500:
         with open(cached, "rb") as f:
             return f.read()
+
+    # ---- 실패(404) 캐시: 없는 카드(커스텀/프리릴리즈)를 매번 원격에 묻지 않는다 ----
+    #   예전에는 매 렌더마다 404 왕복이 발생해 카드 목록이 수천 장이면 게임이 멈출 정도로 느려졌다.
+    miss_marker = os.path.join(PIC_CACHE, ".miss", name.replace("/", "_") + ".miss")
+    if os.path.isfile(miss_marker):
+        try:
+            if time.time() - os.path.getmtime(miss_marker) < MISS_TTL:
+                return None
+        except OSError:
+            pass
+
     import urllib.request
     # field/cover 는 게임 config 의 urls 템플릿을 우선 사용(원본과 동일)
     tpls = list(PIC_UPSTREAM)
@@ -160,11 +175,26 @@ def fetch_image(rel):
             tpls = [t for t in tpls if "images/cards" not in t]
     except Exception:
         pass
+
+    # 커스텀 카드(9자리 이상 ID)는 원격에 없을 가능성이 높다 → 1회만, 짧은 타임아웃
+    _base = name.split("/")[-1]
+    _id = _base.split(".")[0]
+    is_custom = _id.isdigit() and len(_id) >= 9
+    if is_custom:
+        # 커스텀/프리릴리즈 카드는 원격에 없을 가능성이 매우 높다 → 원격 조회 생략(즉시 404)
+        try:
+            os.makedirs(os.path.dirname(miss_marker), exist_ok=True)
+            with open(miss_marker, "wb") as f:
+                f.write(b"1")
+        except Exception:
+            pass
+        return None
+
     for tpl in tpls:
         url = tpl.format(name)
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "edopro-web"})
-            with urllib.request.urlopen(req, timeout=12) as r:
+            with urllib.request.urlopen(req, timeout=(4 if is_custom else 12)) as r:
                 data = r.read()
             if len(data) > 500:
                 with open(cached, "wb") as f:
@@ -173,6 +203,14 @@ def fetch_image(rel):
                 return data
         except Exception:
             continue
+
+    # 실패 기록 → 다음 요청부터 즉시 404
+    try:
+        os.makedirs(os.path.dirname(miss_marker), exist_ok=True)
+        with open(miss_marker, "wb") as f:
+            f.write(b"1")
+    except Exception:
+        pass
     return None
 
 
@@ -402,7 +440,7 @@ def _repo_state_key():
     return "|".join(parts)
 
 
-def build_repo_bundle():
+def build_repo_bundle(lang=""):
     """저장소 파일을 게임이 읽는 경로로 매핑해 {대상경로: base64} 로 만든다.
 
     - *.cdb                -> expansions/<repo>__<이름>.cdb
@@ -412,12 +450,13 @@ def build_repo_bundle():
     - 퍼즐 리포의 *.lua     -> puzzles/<이름>.lua
     - pics/ 의 jpg,png      -> pics/[field|cover/]<이름>
     """
-    key = _repo_state_key()
+    key = _repo_state_key() + "|lang=" + (lang or "")
     if _bundle_cache["key"] == key and _bundle_cache["json"] is not None:
         return _bundle_cache["json"], _bundle_cache["etag"]
 
     files = {}
     total = 0
+    skipped_cdb = []
     if os.path.isdir(REPO_ROOT):
         for repo in sorted(os.listdir(REPO_ROOT)):
             repo_dir = os.path.join(REPO_ROOT, repo)
@@ -437,6 +476,8 @@ def build_repo_bundle():
                     is_puzzle = ("puzzle" in repo_l) or rel_l.startswith("puzzles/") or "/puzzle" in rel_l
                     is_pic = ("pics/" in rel_l) or rel_l.startswith("pics") or ("pics" in repo_l)
                     if low.endswith(".cdb"):
+                        # 언어 선택은 번들 요청의 ?lang= 으로 처리한다
+                        # (한국어면 언어팩 cdb 를 z 순으로 마지막에 넣어 덮어쓴다)
                         dest = f"expansions/{safe_repo}__{name}"
                     elif low == "strings.conf":
                         # 기본 자산(.data)에 이미 한국어 UTF-8 strings.conf 를 넣어 두었으므로
@@ -468,10 +509,24 @@ def build_repo_bundle():
                     files[dest] = base64.b64encode(data).decode()
                     total += len(data)
 
+    # ---- 언어 선택: 한국어면 언어팩 cdb 를 마지막(z 순)에 넣어 카드 이름/효과를 덮어쓴다 ----
+    _lang = (lang or "").strip()
+    _korean = ("한" in _lang) or _lang.lower() in ("korean", "ko", "ko-kr")
+    if _korean and os.path.isfile(KOREAN_CDB):
+        try:
+            with open(KOREAN_CDB, "rb") as _f:
+                _kdata = _f.read()
+            files["expansions/zzz-korean-cards.cdb"] = base64.b64encode(_kdata).decode()
+            total += len(_kdata)
+            log(f"bundle lang=korean (+{len(_kdata)/1048576:.1f}MB cdb)")
+        except Exception as _e:
+            log(f"bundle korean cdb fail: {_e}")
+
     body = json.dumps({"files": files, "count": len(files), "bytes": total}, ensure_ascii=False).encode()
     etag = '"' + hashlib.sha1(body).hexdigest() + '"'
     _bundle_cache.update(key=key, json=body, etag=etag)
-    log(f"repo bundle {len(files)} files ({total/1048576:.1f}MB)")
+    log(f"repo bundle {len(files)} files ({total/1048576:.1f}MB)"
+        + (f"  [skip cdb {len(skipped_cdb)}: {', '.join(skipped_cdb[:4])}]" if skipped_cdb else ""))
     return body, etag
 
 
@@ -933,7 +988,8 @@ async def handle(reader, writer):
 
         # ---- 저장소 번들(자동 업데이트 반영) ----
         if path == "/api/repos/bundle":
-            body, etag = await asyncio.get_event_loop().run_in_executor(None, build_repo_bundle)
+            _lang = (urllib.parse.parse_qs(parsed.query).get("lang") or [""])[0]
+            body, etag = await asyncio.get_event_loop().run_in_executor(None, build_repo_bundle, _lang)
             inm = headers.get("if-none-match")
             if inm and inm.strip() == etag:
                 writer.write(resp(304, "Not Modified", b"", "application/json", f"ETag: {etag}\r\nCache-Control: no-cache\r\n"))

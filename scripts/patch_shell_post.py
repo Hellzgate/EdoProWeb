@@ -483,6 +483,14 @@ window.addEventListener('unhandledrejection', function (e) {
     walk('/replay', list);
     walk('/puzzles', list);
     try { if (FS.analyzePath('/config/system.conf').exists) list.push({ path: '/config/system.conf', size: FS.stat('/config/system.conf').size }); } catch (e) {}
+    /* 게임 언어 설정을 기억해 두었다가 다음 부팅 때 그 언어의 카드DB 를 받는다 */
+    try {
+      if (FS.analyzePath('/config/system.conf').exists) {
+        var _sc = FS.readFile('/config/system.conf', { encoding: 'utf8' });
+        var _m = /^\\s*language\\s*=\\s*(.+?)\\s*$/m.exec(_sc);
+        if (_m) localStorage.setItem('edopro-lang', _m[1]);
+      }
+    } catch (e) {}
     var files = {};
     var sig = [];
     for (var i = 0; i < list.length; i++) {
@@ -583,7 +591,10 @@ window.addEventListener('unhandledrejection', function (e) {
   function applyRepoBundle() {
     try {
       var xhr = new XMLHttpRequest();
-      xhr.open('GET', '/api/repos/bundle', false);
+      var _lang = '';
+      try { _lang = localStorage.getItem('edopro-lang') || ''; } catch (e) {}
+      if (!_lang) { try { var _sc0 = FS.readFile('/config/system.conf', { encoding: 'utf8' }); var _m0 = /^\s*language\s*=\s*(.+?)\s*$/m.exec(_sc0); if (_m0) _lang = _m0[1]; } catch (e) {} }
+      xhr.open('GET', '/api/repos/bundle' + (_lang ? ('?lang=' + encodeURIComponent(_lang)) : ''), false);
       xhr.send(null);
       if (xhr.status !== 200) { console.log('[repo] bundle status ' + xhr.status); return; }
       var j = JSON.parse(xhr.responseText);
