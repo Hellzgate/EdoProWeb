@@ -24,7 +24,7 @@ em++ -O1 -w -std=c++17 -fno-rtti -fexceptions \
   --preload-file "$A/lflists@/lflists" \
   --preload-file "$A/deck@/deck" \
   --preload-file "$A/script@/script" \
-  --preload-file "$HOME/edo-src/assets-nobgm/sound@/sound" \
+  --preload-file "$HOME/edo-src/assets-sound@/sound" \
   --preload-file "$EDO/irrlicht/media@/media" \
   2>&1 | tail -3
 
