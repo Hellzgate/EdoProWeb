@@ -126,6 +126,7 @@ MIME = {
 PIC_CACHE = os.environ.get("PIC_CACHE", "/app/piccache")
 KOREAN_CDB = os.environ.get("KOREAN_CDB", "/app/lang/korean/cards.cdb")
 MISS_TTL = int(os.environ.get("PIC_MISS_TTL", str(24 * 3600)))   # 이미지 404 캐시(초)
+LOCAL_PICS = os.environ.get("LOCAL_PICS", "/app/localpics")   # 사용자 EDOPro pics 오버레이(ro)
 
 PIC_UPSTREAM = [
     "https://images.ygoprodeck.com/images/cards/{}",
@@ -152,6 +153,21 @@ def fetch_image(rel):
     if os.path.isfile(cached) and os.path.getsize(cached) > 500:
         with open(cached, "rb") as f:
             return f.read()
+
+    # ---- 로컬 오버레이: 사용자의 EDOPro pics(프리릴리즈/커스텀)를 먼저 사용 ----
+    #   프리릴리즈 카드는 ygoprodeck 에 없어 원본 EDOPro 도 이미지가 없다.
+    #   사용자가 가진 pics 를 그대로 서빙해 "원본과 동일한 화면"을 만든다.
+    if LOCAL_PICS and os.path.isdir(LOCAL_PICS):
+        local = os.path.join(LOCAL_PICS, name)
+        if os.path.isfile(local) and os.path.getsize(local) > 500:
+            try:
+                with open(local, "rb") as f:
+                    data = f.read()
+                with open(cached, "wb") as f:
+                    f.write(data)
+                return data
+            except Exception:
+                pass
 
     # ---- 실패(404) 캐시: 없는 카드(커스텀/프리릴리즈)를 매번 원격에 묻지 않는다 ----
     #   예전에는 매 렌더마다 404 왕복이 발생해 카드 목록이 수천 장이면 게임이 멈출 정도로 느려졌다.

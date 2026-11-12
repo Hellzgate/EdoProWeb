@@ -90,14 +90,21 @@ $adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
 
 ---
 
-## 6. 정리/개선 제안
+## 6. 자동화 스크립트 (구현 완료)
 
-1. **`scripts/health.sh`** 신설(미구현) — 아래를 한 번에 확인
-   ```
-   page=200 / /api/repos / bundle?lang=Korean 크기 / wasm 304 / img 200·404(즉시)
-   ```
-2. **`scripts/deploy.sh`** — `docker build + rm + run` 표준화(현재 명령이 길어 실수 위험)
-3. **`_tmp` 스크립트 승격** — 반복 사용한 `patch_*.py` 중 필요한 것만 `scripts/` 로 이동
-4. **Playwright MCP 설정 문서화**(위 §2) — 새 세션에서 그대로 재현
-5. **adb 헬퍼**(`_tools/adb.ps1`) — `tap/text/shot/reload` 단축
-6. **DeX 검증 절차** — 폰 화면 캡처 불가 → PC 브라우저/사용자 확인으로 대체 명시
+| 파일 | 사용 | 내용 |
+|---|---|---|
+| `scripts/health.sh` | `sh health.sh [baseUrl]` | page / repos(5) / 번들 ko>en / wasm **304** / 이미지(로컬·원격·즉시 404) / 진단 페이지 5종 |
+| `scripts/deploy.sh` | `sh deploy.sh <version>` | `docker build → rm → run` 표준화, **프릴 pics 마운트**(`-v …:/app/localpics:ro`) 포함 |
+| `_tools/adb.ps1` | `-Action status|reload|tap|text|key|shot` | 폰 헬퍼(웨일 패키지 고정, DeX 캡처 불가 주의) |
+
+```
+# 실측 예 (health.sh)
+[health] OK=12 FAIL=0      (page/repos/ko-en/wasm304/img local·remote·404/진단 5종)
+```
+
+## 7. 남은 개선
+
+1. **`_tmp` 패치 스크립트 승격** — 반복 사용한 `patch_*.py` 중 필요한 것만 `scripts/` 로 이동
+2. **wasm 심볼 빌드**(`-g`) — `function signature mismatch`(패 테스트) 스택 심볼화
+3. **DeX 검증 절차** — 폰 화면 캡처 불가: PC 브라우저/사용자 확인으로 대체(문서화됨)

@@ -460,17 +460,22 @@ void CGUIComboBox::openCloseMenu()
 			h = 1;
 
 		ActiveFont = skin->getFont();
+		/* 팝업 높이와 리스트의 아이템 높이를 **같은 값**으로 강제한다.
+		   (둘이 다르면 스크롤바가 생겨 scrollPos 만큼 클릭 행이 밀린다) */
+		s32 itemH = 24;
 		if (ActiveFont)
-			h *= (ActiveFont->getDimension(L"A").Height + 4);
+			itemH = ActiveFont->getDimension(L"A").Height + 4;
+		h *= (u32)itemH;
 
 		// open list box
 		core::rect<s32> r(0, AbsoluteRect.getHeight(),
-			AbsoluteRect.getWidth(), AbsoluteRect.getHeight() + h);
+			AbsoluteRect.getWidth(), AbsoluteRect.getHeight() + (s32)h);
 
 		ListBox = new CGUIListBox(Environment, this, -1, r, false, true, true);
 		ListBox->setSubElement(true);
 		ListBox->setNotClipped(true);
 		ListBox->drop();
+		ListBox->setItemHeight(itemH);
 
 		// ensure that list box is always completely visible
 		if (ListBox->getAbsolutePosition().LowerRightCorner.Y > Environment->getRootGUIElement()->getAbsolutePosition().getHeight())
