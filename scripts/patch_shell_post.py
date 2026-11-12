@@ -282,17 +282,11 @@ window.addEventListener('unhandledrejection', function (e) {
   try { console.log('[js-reject] ' + ((e.reason && e.reason.stack) || e.reason)); } catch (x) {}
 });
 
-/* ===== 화면 맞춤 (v1.13.6: dpr=1 정규화 + 2x 렌더 + transform 표시) ===== */
+/* ===== 화면 맞춤 (v1.15: 논리 해상도 고정 + 화면 꽉 채우기) ===== */
 (function () {
-  /* SDL2(emscripten)은 리사이즈 이벤트를 CSS px 로 보내지만 캔버스 버퍼는 CSS×dpr 로 잡는다.
-     dpr 을 1로 고정하면 두 값이 같아져 회전 시에도 어긋나지 않는다(PC 와 동일 동작).
-     화질은 CSS 크기를 화면표시 크기의 SS 배로 잡고 transform 으로 축소해 확보한다. */
-  var REAL_DPR = window.__edoproRealDpr || window.devicePixelRatio || 1;
-  try {
-    Object.defineProperty(window, 'devicePixelRatio', { configurable: true, get: function () { return 1; } });
-  } catch (e) {}
-  var SS = Math.min(2, Math.max(1, REAL_DPR));   /* 폰:2, PC:1 */
-
+  /* 페이지 논리 폭을 1280 으로 고정(원본 EDOPro 1024~1280 과 동일한 UI 크기).
+     dpr 을 1로 고정해 캔버스 버퍼 = CSS px 로 일치시킨다(SDL/셸 단위 불일치 방지). */
+  var LOGICAL_W = 1280;
   var BASE_W = 1024, BASE_H = 640;
   var lastCss = '';
   var sending = false;
@@ -309,7 +303,6 @@ window.addEventListener('unhandledrejection', function (e) {
     return st;
   }
 
-  /* 부팅 후에만 SDL 에 재통지(초기화 중 통지는 렌더러를 깨뜨린다) */
   function sendResize() {
     try {
       sending = true;
@@ -325,19 +318,21 @@ window.addEventListener('unhandledrejection', function (e) {
     var H = document.documentElement.clientHeight || window.innerHeight || 0;
     if (!W || !H) return;
 
-    var s = Math.min(W / BASE_W, H / BASE_H);
-    if (!isFinite(s) || s <= 0) return;
-
-    /* 캔버스(=SDL 버퍼, CSS px) 는 표시 크기의 SS 배 */
-    var w = Math.max(200, Math.round(BASE_W * s * SS));
-    var h = Math.max(120, Math.round(BASE_H * s * SS));
-    var k = 1 / SS;
-    var x = Math.round((W - w * k) / 2);
-    var y = Math.round((H - h * k) / 2);
+    var w, h;
+    if (W / H >= 1.0) {
+      /* 가로: 화면 꽉 채움(논리 폭 1280 유지, 세로는 화면 비율대로) */
+      w = W;
+      h = Math.max(240, H);
+    } else {
+      /* 세로: 16:10 레터박스(회전 안내) */
+      var s = Math.min(W / BASE_W, H / BASE_H);
+      if (!isFinite(s) || s <= 0) return;
+      w = Math.max(200, Math.floor(BASE_W * s));
+      h = Math.max(120, Math.floor(BASE_H * s));
+    }
 
     var css = 'canvas.emscripten{width:' + w + 'px!important;height:' + h + 'px!important;'
-      + 'position:fixed!important;left:0!important;top:0!important;margin:0!important;'
-      + 'transform-origin:0 0!important;transform:translate(' + x + 'px,' + y + 'px) scale(' + k + ')!important;'
+      + 'position:fixed!important;inset:0!important;margin:auto!important;'
       + 'border:0!important;max-width:none!important;max-height:none!important}';
     if (css !== lastCss) {
       styleEl().textContent = css;
@@ -345,14 +340,10 @@ window.addEventListener('unhandledrejection', function (e) {
       if (bootDone && location.search.indexOf('sync=0') < 0) sendResize();
     }
 
-    /* 계측(주의: getContext 호출 금지 — SDL 보다 먼저 컨텍스트를 잡으면 게임이 죽는다) */
+    /* 계측(getContext 금지) */
     try {
-      var cs2 = getComputedStyle(c);
-      var rc = c.getBoundingClientRect();
-      var vi = 'WxH ' + W + 'x' + H + '  dpr ' + REAL_DPR + '  ss ' + SS
-        + '  css ' + Math.round(parseFloat(cs2.width)) + 'x' + Math.round(parseFloat(cs2.height))
-        + '  rect ' + Math.round(rc.width) + 'x' + Math.round(rc.height)
-        + '  buf ' + c.width + 'x' + c.height;
+      var vi = 'WxH ' + W + 'x' + H + '  dpr ' + (window.devicePixelRatio || 1)
+        + '  css ' + w + 'x' + h + '  buf ' + c.width + 'x' + c.height;
       if (vi !== window.__edoproViewStr) {
         window.__edoproViewStr = vi;
         try {
@@ -386,7 +377,6 @@ window.addEventListener('unhandledrejection', function (e) {
     for (var i = 0; i < d.length; i++) setTimeout(fit, d[i]);
   }
 
-  /* 캡처 단계: 브라우저 resize 직후 SDL(버블)이 읽을 CSS 를 우리가 먼저 확정한다 */
   window.addEventListener('resize', function () {
     if (sending) return;
     fit();
@@ -756,12 +746,13 @@ if start != -1:
     if end != -1:
         s = s[:start] + s[end + len("</script>"):]
 
-META = '<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">'
+META = '<meta name="viewport" content="width=1280, user-scalable=no">'
 if 'name="viewport"' not in s:
     s = s.replace("</head>", META + "</head>", 1)
+else:
+    s = re.sub(r'<meta name="viewport"[^>]*>', META, s, count=1)
 
-# dpr 정규화(가장 먼저 실행): SDL(emscripten)이 CSS px 로 리사이즈를 알리는데
-# Emscripten 셸은 캔버스 버퍼를 CSS*dpr 로 잡아 dpr>1 기기에서 게임이 1/dpr 만 그린다.
+# dpr 정규화(가장 먼저 실행): SDL(emscripten)과 셸이 같은 픽셀 단위를 쓰게 한다.
 EARLY = (
     '<script>/*dpr1*/'
     '(function(){try{window.__edoproRealDpr=window.devicePixelRatio||1;'
@@ -770,6 +761,8 @@ EARLY = (
     '</script>'
 )
 if '/*dpr1*/' not in s:
+    s = s.replace("<head>", "<head>" + EARLY, 1)
+
     s = s.replace("<head>", "<head>" + EARLY, 1)
 
 if "</body>" in s:
