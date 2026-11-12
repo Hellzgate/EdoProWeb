@@ -1,4 +1,10 @@
-﻿# EDOPro Web (WebAssembly)
+# EDOPro Web (브라우저/WebAssembly)
+
+- 남은 작업: [docs/BACKLOG.md](docs/BACKLOG.md)
+- 구조: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- 릴리스: [docs/RELEASE-v1.19.4.md](docs/RELEASE-v1.19.4.md)
+
+# EDOPro Web (WebAssembly)
 
 **Project Ignis: EDOPro 41.0.2** 클라이언트를 **Emscripten 으로 WebAssembly 빌드**해 브라우저에서 실행하고,
 미니PC **Docker** 에 올려 **한 포트(7556)** 로 배포하는 프로젝트입니다.
