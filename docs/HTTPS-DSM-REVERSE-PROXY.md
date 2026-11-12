@@ -238,3 +238,31 @@ bash ~/edopro-tls/setup.sh --selfsigned     # 자체서명으로 임시 기동
 | 이미지 | `edopro-web:1.16.3` |
 | 8451 | **비어 있음** (A안 프록시 또는 B안 nginx 가 사용) |
 | 준비물 | `~/edopro-tls/{nginx.conf,setup.sh}`, `D:\rea-out\edopro-web\scripts\tls\` |
+
+---
+
+## A안 최종 검증 (2026-11-12 20:52, **성공**)
+
+| 항목 | 결과 |
+|---|---|
+| `https://sw20103.synology.me:8451/` | **200 / 53,482B · 인증서 신뢰됨(경고 없음)** |
+| `/edopro-full.data` | **200 / 104,734,390B** (전송 49.8MB gzip, 클라이언트가 해제) · **2,055ms** |
+| `/ws` WebSocket | **101 Switching Protocols** ✅ |
+| `/manifest.json` (PWA) | 200 |
+
+**WebSocket 확인**: `curl --http1.1` + Upgrade 헤더로 **101** 확인 →
+**DSM 7.4.1 역방향 프록시는 WebSocket 을 정상 통과**시킨다(앞선 "Upgrade 헤더가 없다"는 우려는 이 항목에서는 문제되지 않음).
+
+**함정(실측)**: .NET `ClientWebSocket` 으로 테스트하면 **HTTP/2(ALPN h2) 협상** 때문에 실패한다
+(`Unable to connect to the remote server`). 브라우저 WebSocket 은 HTTP/1.1 로 붙으므로 정상이며,
+검증 스크립트는 **`curl --http1.1`** 를 써야 한다.
+
+### 접속 URL
+
+```
+https://sw20103.synology.me:8451/
+```
+
+- 폰: 같은 Wi-Fi 에서도 **헤어핀 NAT** 로 접속된다(외부 LTE 에서도 동일).
+- 신뢰 인증서이므로 **PWA 설치**(홈 화면에 추가 → 전체화면·가로) 가능.
+- 8451 은 DSM 프록시가 사용하고, 미니PC의 `edopro-tls`(nginx)는 **사용하지 않는다**(B안 보관).
