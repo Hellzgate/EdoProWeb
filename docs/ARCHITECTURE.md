@@ -68,6 +68,12 @@
 | `LOBBY_UPSTREAM` / `LOBBY_ALLOW_ANY` | `http://192.168.0.4:7922` / 1 | 방 목록 프록시 |
 | `BOT_PANEL_URL` / `BOT_PANEL_TOKEN` | — | 멀티롤 봇 패널 |
 | `USERDATA_DIR` | `/app/userdata` | 덱/리플레이 볼륨 |
+| `GAME_CONFIG_DIR` | `/app/config` | **EDOPro `configs.json`·`user_configs.json`** — repos/urls 를 읽어 `REPOS` 와 합집합 |
+
+### 정적 응답 (v1.19)
+- `.gz` 사전 압축본 우선 + `Range` 지원(모바일 청크 로더)
+- **`ETag`(W/"size-mtime") · `Last-Modified` · `If-None-Match` → 304** (재방문 시 65MB 재다운로드 방지)
+- `/api/beacon?b=<빌드>&ime=<타입>` — 클라이언트가 어느 빌드를 실행 중인지 서버 로그로 확인
 
 ---
 
@@ -82,6 +88,10 @@
 | S5 | `BOOT` | ①화면 맞춤(`fit`) ②덱/리플레이 동기화(`/api/userdata`) ③레포 번들 적용 ④드래그&드롭 |
 | S6 | `FS` | 우상단 ⛶ 전체화면 토글 |
 | S7 | `FS2` | 로딩 시 1탭 시작 오버레이(가로 전용·12초 자동 해제) |
+| S8 | `FS3` | 우상단 📁 → `/files.html`(덱·리플레이 업/다운로드) |
+| S9 | `FS4` | 첫 사용자 제스처에서 `AudioContext.resume()` (자동재생 정책) |
+| S10 | `FS5` | **모바일 IME 브리지** — HTML 입력 → `keypress` → SDL_TEXTINPUT |
+| S11 | `buildtag`/`FS6` | 빌드 스탬프(wasm mtime) · `Module.locateFile` · 6초 배지 · `/api/beacon` |
 | — | `_strip_injected()` | 재실행 시 이전 주입 제거(멱등) |
 
 **주입 규칙**: `</head>` 앞 CSS/meta, `<head>` 직후 dpr=1 스크립트(가장 먼저), `</body>` 앞 JS 블록들.
@@ -96,6 +106,10 @@
 | `irrlicht/src/CIrrDeviceSDL2.cpp` | 캔버스 **버퍼 크기** 사용 + `SDL_WINDOWEVENT_RESIZED` 처리 | SDL 은 CSS px, 버퍼는 CSS×dpr |
 | `gframe/image_manager.cpp` | `web_fetch_pic()` — `/img/…` **동기 XHR** → MEMFS | libcurl 스텁 |
 | `gframe/game.cpp` | `[WEBSTEP]/[WEBFLOW]` 로그, `-O0` 컴파일 | 모바일 V8 거대함수 크래시 |
+| `gframe/sound_manager.cpp` | emscripten 은 `MakeMiniaudioBackendDirect()` | **pthread 없음 → `std::thread` 백엔드 생성 실패(무음)** |
+| `gframe/SoundBackends/miniaudio/sound_miniaudio.cpp` | `ma_backend_webaudio` 명시 + `ma_engine_config.pContext` | 자동 선택이 네이티브 백엔드를 먼저 시도 → 초기화 실패 |
+| `irrlicht/src/CIrrDeviceSDL2.cpp` | `checkAndUpdateIMEState()` 에서 `Module.__edoproIME(on, rect)` | SDL2-emscripten 에 IME 없음 → HTML 입력 브리지 |
+| `gframe/repo_manager.*` | `web_stubs.cpp` 로 대체 | 브라우저는 git 불가 → 서버가 대신 받고 목록만 표시 |
 | `deps/curl-stub/curlstub.c` | 전 함수 실패 반환 | 링크용 |
 
 ---
