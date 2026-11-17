@@ -1,6 +1,6 @@
 # EDOPro Web — 현재 상태 / 다음 작업 (인수인계)
 
-> 새 세션은 **이 파일만 읽고** 이어서 시작한다. (2026-11-17 기준 · 배포 `edopro-client:0.7.3`)
+> 새 세션은 **이 파일만 읽고** 이어서 시작한다. (2026-11-17 기준 · 배포 `edopro-client:0.7.5`)
 > 최신 커밋: `2bda383`(LocalCore) 이후 → 이번 작업분 커밋 예정.
 
 ## 1. 한 줄 상태
@@ -80,7 +80,7 @@ python tools/patch-cards-meta.py                   # setcodes 등 주입
 
 | 항목 | 값 |
 |---|---|
-| 이미지 | `edopro-client:0.7.3` (이전 0.6.0 → 0.7.3) |
+| 이미지 | `edopro-client:0.7.5` (0.6.0 → 0.7.5) |
 | 컨테이너 | `edopro-client` · `--restart unless-stopped` · **:7560** |
 | 데이터 | 볼륨 `/home/hellzsub/edopro-data` → `/data` (**root 소유** → 갱신은 docker 임시 컨테이너로) |
 | 데이터 갱신(로컬→서버) | `docker run --rm -v /home/hellzsub/edopro-data:/data -v ~/up.json:/src/x:ro alpine cp …` |
@@ -96,9 +96,13 @@ python tools/patch-cards-meta.py                   # setcodes 등 주입
 - SORT_CARD/CHAIN 실제 순서 변경(현재는 그대로 확정만) · COUNTER 분배 · ANNOUNCE_RACE(종족 이름표)
 - 다중 선택 UI 에서 `min` 미만일 때 확정 비활성 (이미 적용) · 취소/뒤로
 
-### 덱 연결
-- 덱 편집기에서 만든 덱을 **로컬 듀얼로 바로 시작**(localStorage 또는 `.ydk` 업로드) · 엑스트라 덱 UI
-- 사이드 덱 교환(원본 지원 확인됨 — `STOC_CHANGE_SIDE`)
+### 덱 연결 (완료)
+- 덱 편집기 **[이 덱으로 듀얼]** → localStorage `edopro.deck` → 로컬 듀얼이 그대로 사용
+  (실측: 3장 덱으로 `패 3 · 덱 0`, 버튼 라벨 `내 덱으로 시작 (3장)`)
+- `.ydk` 업로드 · 기본 덱 자동 생성 · 사이드 덱 교환은 아직
+
+### 선택 UI (완료/부분)
+- 정렬(SORT) ▲▼ 실제 순서 변경 · 코인 **자동 분배** · 종족/속성 **한국어 이름** · 보드에 LP/패/묘지/제외 + 더미 장수 표시
 
 ### 데이터/성능
 - 스크립트 **전체 프리페치 옵션**(현재는 시스템 21 + 덱 카드만) · 실패 시 그 카드 효과만 비활성

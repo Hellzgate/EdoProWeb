@@ -8,6 +8,7 @@ import {
 type Zone = 'main' | 'extra' | 'side';
 
 const ROW_H = 44;
+const DECK_KEY = 'edopro.deck';
 const LIMIT = { main: 60, extra: 15, side: 15 } as const;
 
 export class DeckEditor {
@@ -46,6 +47,7 @@ export class DeckEditor {
           <div class="deck-zone" data-zone="side"><header>사이드 <b id="c-side">0</b>/15</header><ul id="l-side"></ul></div>
           <div class="deck-bar">
             <button id="dk-export" class="primary">.ydk 내보내기</button>
+            <button id="dk-duel" class="primary">이 덱으로 듀얼</button>
             <button id="dk-clear">비우기</button>
           </div>
         </div>
@@ -57,6 +59,7 @@ export class DeckEditor {
   private async init(): Promise<void> {
     try {
       this.cards = await loadCards();
+      this.load();
       this.ready = true;
       this.refresh();
     } catch (e) {
@@ -81,10 +84,35 @@ export class DeckEditor {
     });
 
     this.root.querySelector('#dk-export')!.addEventListener('click', () => this.exportYdk());
+    this.root.querySelector('#dk-duel')!.addEventListener('click', () => {
+      this.save();
+      document.querySelector<HTMLButtonElement>('nav .tab[data-tab="duel"]')?.click();
+    });
     this.root.querySelector('#dk-clear')!.addEventListener('click', () => {
       this.deck = { main: [], extra: [], side: [] };
+      this.save();
       this.renderZones();
     });
+  }
+
+  /** 덱을 localStorage 에 보관 — 로컬 듀얼이 그대로 사용한다 */
+  private save(): void {
+    try {
+      localStorage.setItem(DECK_KEY, JSON.stringify(this.deck));
+    } catch {
+      /* 저장 실패는 무시 */
+    }
+  }
+
+  private load(): void {
+    try {
+      const j = JSON.parse(localStorage.getItem(DECK_KEY) ?? 'null') as Record<Zone, number[]> | null;
+      if (j && Array.isArray(j.main)) {
+        this.deck = { main: j.main, extra: j.extra ?? [], side: j.side ?? [] };
+      }
+    } catch {
+      /* 손상된 값 무시 */
+    }
   }
 
   private refresh(): void {
@@ -139,6 +167,7 @@ export class DeckEditor {
     const zone: Zone = isExtraDeck(c) ? 'extra' : 'main';
     if (this.deck[zone].length >= LIMIT[zone]) return;
     this.deck[zone].push(c.id);
+    this.save();
     this.renderZones();
   }
 
@@ -153,6 +182,7 @@ export class DeckEditor {
         li.innerHTML = `<span class="t">${esc(c ? displayName(c, this.lang) : '#' + this.deck[z][i])}</span><button title="빼기">×</button>`;
         li.querySelector('button')!.addEventListener('click', () => {
           this.deck[z].splice(i, 1);
+          this.save();
           this.renderZones();
         });
         frag.appendChild(li);

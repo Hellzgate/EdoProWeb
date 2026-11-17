@@ -35,6 +35,19 @@ import {
 const LOC_M = 0x04;
 const LOC_S = 0x08;
 
+/** 종족/속성 이름 (ocgapi_constants.h 비트) */
+const RACE_NAMES: Record<number, string> = {
+  0x1: '전사', 0x2: '마법사', 0x4: '천사', 0x8: '악마', 0x10: '좀비', 0x20: '기계',
+  0x40: '물', 0x80: '화염', 0x100: '암석', 0x200: '비행야수', 0x400: '식물',
+  0x800: '곤충', 0x1000: '번개', 0x2000: '드래곤', 0x4000: '야수', 0x8000: '야수전사',
+  0x10000: '공룡', 0x20000: '어류', 0x40000: '해룡', 0x80000: '파충류',
+  0x100000: '사이킥', 0x200000: '신', 0x400000: '창조주', 0x800000: '환룡',
+  0x1000000: '사이버스', 0x2000000: '환상',
+};
+const ATTR_NAMES: Record<number, string> = {
+  0x1: '땅', 0x2: '물', 0x4: '화염', 0x8: '바람', 0x10: '빛', 0x20: '어둠', 0x40: '신',
+};
+
 export class DuelScreen {
   private core: LocalCore | null = null;
   private state: DuelState | null = null;
@@ -45,6 +58,7 @@ export class DuelScreen {
   private log: string[] = [];
   private prompt: Prompt | null = null;
   private sel = new Set<number>();
+  private sortOrder: number[] = [];
   private auto = false;
   private started = false;
   private busy = false;
@@ -132,9 +146,14 @@ export class DuelScreen {
     await this.ensureData();
     this.busy = true;
 
-    const decks: [LocalDeck, LocalDeck] = deck
-      ? [deck[0]!, deck[1] ?? deck[0]!]
+    const saved = deck ?? savedDeckPair();
+    const decks: [LocalDeck, LocalDeck] = saved
+      ? [saved[0]!, saved[1] ?? saved[0]!]
       : [defaultDeck(this.cards), defaultDeck(this.cards)];
+    if (saved) {
+      this.$('d-start').textContent = `내 덱으로 시작 (${decks[0].main.length}장)`;
+      if (decks[0].main.length < 40) this.pushLog(`경고: 메인 덱 ${decks[0].main.length}장 (40장 권장)`);
+    }
 
     const codes = [...decks[0].main, ...(decks[0].extra ?? []), ...decks[1].main, ...(decks[1].extra ?? [])];
     this.hint('스크립트 내려받는 중…');
@@ -164,6 +183,7 @@ export class DuelScreen {
     this.setupCanvas();
     this.wire();
     this.resize();
+    this.renderPrompt();
     this.pushLog(`듀얼 시작 · 시스템 스크립트 ${this.core.scriptReport.loaded}/${SYSTEM_SCRIPTS.length}`);
     if (this.core.scriptReport.missing.length) {
       this.pushLog(`시스템 스크립트 누락: ${this.core.scriptReport.missing.join(', ')}`);
@@ -205,6 +225,7 @@ export class DuelScreen {
     if (!p) return;
     this.prompt = p;
     this.sel.clear();
+    this.sortOrder = [];
     this.pushLog(`${p.kind}${'player' in p ? ` (P${p.player + 1})` : ''}`);
     this.renderPrompt();
 
@@ -380,9 +401,23 @@ export class DuelScreen {
         break;
       }
       case 'sort': {
-        title('순서 지정');
-        p.cards.forEach((c, i) => add(`${i + 1}. ${name(c.code)}`, () => this.respond(encodeSort(p.cards.map((_, k) => k)))));
-        add('그대로 확정', () => this.respond(encodeSort(p.cards.map((_, k) => k))), 'primary');
+        if (this.sortOrder.length !== p.cards.length) this.sortOrder = p.cards.map((_, k) => k);
+        title('순서 지정 — ▲▼ 로 변경');
+        this.sortOrder.forEach((cardIdx, pos) => {
+          const row = document.createElement('div');
+          row.className = 'sort-row';
+          const label = document.createElement('span');
+          label.textContent = `${pos + 1}. ${name(p.cards[cardIdx]!.code)}`;
+          const up = document.createElement('button');
+          up.textContent = '▲';
+          up.addEventListener('click', () => this.moveSort(pos, -1));
+          const down = document.createElement('button');
+          down.textContent = '▼';
+          down.addEventListener('click', () => this.moveSort(pos, 1));
+          row.append(label, up, down);
+          box.appendChild(row);
+        });
+        add('확정', () => this.respond(encodeSort(this.sortOrder)), 'primary');
         break;
       }
       case 'counter': {
@@ -398,6 +433,15 @@ export class DuelScreen {
             b.textContent = label();
           });
         });
+        add('자동 분배', () => {
+          let need = p.count;
+          p.cards.forEach((c, i) => {
+            const take = Math.max(0, Math.min(need, c.counters));
+            counts[i] = take;
+            need -= take;
+          });
+          this.respond(encodeCounters(counts));
+        });
         add('확정', () => this.respond(encodeCounters(counts)), 'primary');
         break;
       }
@@ -412,10 +456,9 @@ export class DuelScreen {
         for (let i = 0; i < bits; i++) {
           const on = p.kind === 'race' ? ((p.available >> BigInt(i)) & 1n) === 1n : ((p.available >>> i) & 1) === 1;
           if (!on) continue;
-          const label = p.kind === 'race' ? `종족 ${i}` : `속성 ${i}`;
-          add(label, () =>
-            this.respond(p.kind === 'race' ? encodeRace(1n << BigInt(i)) : encodeAttrib(1 << i)),
-          );
+          const bit = 1 << i;
+          const label = p.kind === 'race' ? (RACE_NAMES[bit] ?? `종족 ${i}`) : (ATTR_NAMES[bit] ?? `속성 ${i}`);
+          add(label, () => this.respond(p.kind === 'race' ? encodeRace(1n << BigInt(i)) : encodeAttrib(bit)));
         }
         break;
       }
@@ -423,6 +466,16 @@ export class DuelScreen {
   }
 
   /* ---------------- 렌더 ---------------- */
+  private moveSort(pos: number, dir: number): void {
+    const to = pos + dir;
+    if (to < 0 || to >= this.sortOrder.length) return;
+    const a = this.sortOrder;
+    const tmp = a[pos]!;
+    a[pos] = a[to]!;
+    a[to] = tmp;
+    this.renderPrompt();
+  }
+
   private setupCanvas(): void {
     this.gl = new BoardRenderer(this.root.querySelector('#d-gl') as HTMLCanvasElement);
     this.fx = (this.root.querySelector('#d-fx') as HTMLCanvasElement).getContext('2d')!;
@@ -483,6 +536,38 @@ export class DuelScreen {
           fx.fillText(i === 5 ? 'FIELD' : 'SET', r.x + r.w / 2, r.y + r.h / 2);
         }
       }
+      // 좌우 정보 + 더미 장수
+      fx.font = '600 12px system-ui, "Malgun Gothic", sans-serif';
+      for (let side = 0; side <= 1; side++) {
+        const deckRect = layout.piles[`deck-${side}`];
+        const extraRect = layout.piles[`extra-${side}`];
+        if (!deckRect || !extraRect) continue;
+        const y = side === 0 ? deckRect.y + deckRect.h + 14 : deckRect.y - 14;
+        fx.fillStyle = side === 0 ? 'rgba(220,235,255,0.92)' : 'rgba(190,205,228,0.8)';
+        fx.textAlign = 'left';
+        fx.fillText(
+          `${side === 0 ? '나' : '상대'}  LP ${s.lp[side]} · 덱 ${s.deck[side]} · 엑덱 ${s.extra[side]} · 패 ${s.hand[side].length} · 묘지 ${s.grave[side].length} · 제외 ${s.banished[side].length}`,
+          extraRect.x,
+          y,
+        );
+      }
+      fx.font = '600 11px ui-monospace, Consolas, monospace';
+      fx.textAlign = 'center';
+      const pile = (side: number, key: string, text: string, color: string) => {
+        const r = layout.piles[`${key}-${side}`];
+        if (!r) return;
+        fx.fillStyle = 'rgba(0,0,0,0.45)';
+        fx.fillRect(r.x + 2, r.y + r.h - 15, r.w - 4, 13);
+        fx.fillStyle = color;
+        fx.fillText(text, r.x + r.w / 2, r.y + r.h - 8);
+      };
+      for (let side = 0; side <= 1; side++) {
+        pile(side, 'deck', String(s.deck[side]), 'rgba(200,225,255,0.95)');
+        pile(side, 'extra', String(s.extra[side]), 'rgba(190,190,255,0.9)');
+        pile(side, 'gy', String(s.grave[side].length), 'rgba(255,200,200,0.85)');
+        pile(side, 'ban', String(s.banished[side].length), 'rgba(230,200,255,0.85)');
+      }
+
       fx.font = '600 12px ui-monospace, Consolas, monospace';
       fx.fillStyle = 'rgba(111,211,195,0.95)';
       fx.fillText(`TURN ${s.turn} · ${phaseName(s.phase)}`, w / 2, h / 2 - 8);
@@ -533,6 +618,22 @@ export class DuelScreen {
 }
 
 /* ---------------- 덱 ---------------- */
+const DECK_KEY = 'edopro.deck';
+
+/** 덱 편집기가 localStorage 에 저장한 덱 (없으면 null) */
+export function savedDeckPair(): LocalDeck[] | null {
+  try {
+    const j = JSON.parse(localStorage.getItem(DECK_KEY) ?? 'null') as
+      | { main?: number[]; extra?: number[]; side?: number[] }
+      | null;
+    if (!j || !Array.isArray(j.main) || j.main.length === 0) return null;
+    const deck: LocalDeck = { main: j.main, extra: j.extra ?? [] };
+    return [deck, deck];
+  } catch {
+    return null;
+  }
+}
+
 export function parseYdk(txt: string): LocalDeck[] {
   const decks: LocalDeck[] = [
     { main: [], extra: [] },
