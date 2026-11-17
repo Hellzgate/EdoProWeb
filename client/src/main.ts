@@ -6,6 +6,7 @@ import { parseYrpx, type ReplayPacket } from './engine/yrpx.ts';
 import { PHASE_NAMES, type DuelState } from './engine/state.ts';
 import { ReplayCore } from './core/ReplayCore.ts';
 import { BoardRenderer, type Quad } from './render/BoardRenderer.ts';
+import { DeckEditor } from './ui/DeckEditor.ts';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -286,6 +287,20 @@ function togglePlay(): void {
 function boot(): void {
   setup();
   setName('hint', '리플레이(.json) 를 선택하세요');
+
+  // 탭 전환 (덱 편집기는 처음 열 때 로드)
+  let deck: DeckEditor | null = null;
+  document.querySelectorAll<HTMLButtonElement>('nav .tab').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const tab = btn.dataset.tab!;
+      document.querySelectorAll('nav .tab').forEach((b) => b.classList.toggle('active', b === btn));
+      document.getElementById('tab-replay')!.classList.toggle('hidden', tab !== 'replay');
+      document.getElementById('tab-deck')!.classList.toggle('hidden', tab !== 'deck');
+      if (tab === 'deck' && !deck) {
+        deck = new DeckEditor(document.getElementById('deck-root')!);
+      }
+    });
+  });
 
   $('load').addEventListener('click', () => load($<HTMLInputElement>('file').files));
   $<HTMLInputElement>('file').addEventListener('change', (e) => load((e.target as HTMLInputElement).files));
