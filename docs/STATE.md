@@ -125,11 +125,19 @@ python tools/patch-cards-meta.py                   # setcodes 등 주입
 client/wasm/webapi.cpp        ocgcore C 심 (create/start/process/get_message/response/new_card/load_script)
 client/tools/build-core.sh    WASM 빌드(17 core + 26 lua, em++ -fexceptions)
 client/public/wasm/           ocgcore.js/.wasm(1.7MB) · wasm-abi.mjs · wasm-smoke.mjs
-client/src/core/              ICore · ReplayCore · LocalCore(패킷 기록 포함) · ocgcore
-client/src/duel/prompts.ts    선택 메시지 ↔ 응답 + autoChoice
-client/src/ui/                DuelScreen(보드·프롬프트·리플레이 저장) · DeckEditor · DataPanel
+client/public/theme/          **원본 EDOPro 자산**(field3.png 매트 · bg.png · cover/cover2 뒷면)
+client/src/core/              ICore · ReplayCore · LocalCore(패킷 기록) · ocgcore(심 바인딩)
+client/src/duel/prompts.ts    선택 메시지 23종 ↔ 응답 + autoChoice
+client/src/render/field.ts    EDOPro materials.cpp 좌표(10×8) 단일 소스
+client/src/render/board.ts    매트+더미+카드+손패+HUD 조립
+client/src/render/cards.ts    카드/손패 그리기(이미지 우선, 없으면 이름판)
+client/src/render/hud.ts      턴·페이즈·LP·체인·승리 알약
+client/src/render/theme.ts    색/타이포 토큰 + roundRect/ellipsis
+client/src/render/assets.ts   카드 이미지·뒷면·매트 로더(비동기 + 재렌더 콜백)
+client/src/ui/                DuelScreen · DeckEditor · DataPanel
 client/src/engine/            state.ts(결정적 상태기계) · msg.ts(95종) · yrpx.ts
-client/tools/                 sync-data.py · refresh.sh · cards.py · patch-cards-meta.py ·
-                              gen-script-index.mjs · duel-full.mjs · duel-record-test.mjs
-docs/                         DESIGN-V2 · GAP-ANALYSIS · DATA-REPOS · YGO-FIELD-LAYOUT · STATE
+client/tools/                 sync-data.py · refresh.sh · patch-cards-meta.py · gen-script-index.mjs ·
+                              duel-full.mjs · duel-record-test.mjs
+docs/                         STATE · EDOPRO-COMPARISON(원본 대조) · YGO-FIELD-LAYOUT(§7 원본 좌표)
+                              · DESIGN-V2 · GAP-ANALYSIS · DATA-REPOS
 ```
