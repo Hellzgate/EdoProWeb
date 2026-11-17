@@ -14,6 +14,9 @@ COPY dist/ /usr/share/nginx/html/
 COPY server/api.py /app/api.py
 COPY tools/sync-data.py tools/refresh.sh /app/tools/
 COPY repos.json /app/repos.json
+# 기본 카드DB(원본 EDOPro 배포물) — git 에는 넣지 않고 이미지에만 넣는다
+COPY basecdb/ /app/basecdb/
+ENV BASE_CDB_DIR=/app/basecdb
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh /app/tools/refresh.sh && mkdir -p /data
 

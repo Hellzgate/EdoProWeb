@@ -35,14 +35,38 @@ OUT = (
 CFG = os.path.join(ROOT, "repos.json")
 CACHE = os.environ.get("REPO_CACHE") or (r"D:\rea-out\_cache\repos" if os.name == "nt" else os.path.expanduser("~/.cache/edopro-repos"))
 
-BASE_CDBS = [
-    r"D:\edopro\expansions\cards.cdb",
-    r"D:\edopro\expansions\cards-unofficial.cdb",
+BASE_DIRS = [
+    os.environ.get("BASE_CDB_DIR") or os.path.join(ROOT, "basecdb"),
+    r"D:\edopro\expansions",
+    r"D:\edopro\repositories\languages\한국어",
 ]
-EN_OVERLAYS = [
-    r"D:\edopro\expansions\cards-en.cdb",
-    r"D:\edopro\expansions\cards-unofficial-en.cdb",
-]
+
+
+def base_files():
+    """기본 카드DB(데이터) + 언어 오버레이(texts).
+    분류: 경로에 한국어/korean → ko · 파일명 ...-en.cdb → en · cards*.cdb → 카드 데이터."""
+    out = []
+    for d in BASE_DIRS:
+        if not d or not os.path.isdir(d):
+            continue
+        found = []
+        for dp, dn, fn in os.walk(d):
+            dn[:] = [x for x in dn if x != ".git"]
+            for f in fn:
+                if not f.lower().endswith(".cdb"):
+                    continue
+                p = os.path.join(dp, f)
+                low = (dp + "/" + f).lower()
+                if "한국어" in dp or "korean" in low:
+                    found.append((p, "ko"))
+                elif re.search(r"en\.cdb$", f.lower()):
+                    found.append((p, "en"))
+                elif f.lower().startswith("cards"):
+                    found.append((p, "base"))
+        if found:
+            out = found
+            break
+    return out
 KO_OVERLAYS = [r"D:\edopro\repositories\languages\한국어-3\korean_temp.cdb"]
 
 
@@ -186,17 +210,18 @@ def main():
             }
         )
 
-    for p in BASE_CDBS:
-        if os.path.isfile(p):
-            d, _t = read_cdb(p)
-            for k, v in d.items():
+    for p, kind in base_files():
+        if kind == "base":
+            for k, v in read_cdb(p)[0].items():
                 datas.setdefault(k, v)
-    for p in EN_OVERLAYS:
-        if os.path.isfile(p):
-            add_texts(en, read_cdb(p, texts_only=True)[1])
-    for p in KO_OVERLAYS:
-        if os.path.isfile(p):
-            add_texts(ko, read_cdb(p, texts_only=True)[1])
+            for k, v in read_cdb(p, texts_only=True)[1].items():
+                en.setdefault(k, v)
+        elif kind == "en":
+            for k, v in read_cdb(p, texts_only=True)[1].items():
+                en.setdefault(k, v)
+        else:
+            for k, v in read_cdb(p, texts_only=True)[1].items():
+                ko.setdefault(k, v)
 
     cards = []
     for cid, d in datas.items():
