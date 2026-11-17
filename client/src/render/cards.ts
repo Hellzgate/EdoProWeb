@@ -80,6 +80,22 @@ export function drawCard(
   }
 }
 
+/** 손패 카드 사각형 목록 — 그리기와 클릭 판정이 같은 계산을 쓴다 */
+export function handRects(
+  layout: FieldLayout,
+  area: Rect,
+  n: number,
+): Array<Rect> {
+  if (!area || n <= 0) return [];
+  const cw = Math.min(layout.cardW * 0.96, area.h / 1.45);
+  const chh = cw * 1.45;
+  const step = n > 1 ? Math.min(cw + 4, Math.max(cw * 0.34, (area.w - cw) / (n - 1))) : 0;
+  const totalW = cw + step * (n - 1);
+  const x0 = area.x + (area.w - totalW) / 2;
+  const y = area.y + (area.h - chh) / 2;
+  return Array.from({ length: n }, (_, i) => ({ x: x0 + i * (step || cw + 4), y, w: cw, h: chh }));
+}
+
 /** 손패 — 겹쳐서 그리고, 좁으면 더 겹친다 */
 export function drawHand(
   ctx: CanvasRenderingContext2D,
@@ -90,15 +106,9 @@ export function drawHand(
   back: HTMLImageElement | null,
 ): void {
   if (!area || !codes.length) return;
-  const n = codes.length;
-  const cw = Math.min(layout.cardW * 0.96, area.h / 1.45);
-  const chh = cw * 1.45;
-  const step = n > 1 ? Math.min(cw + 4, Math.max(cw * 0.34, (area.w - cw) / (n - 1))) : 0;
-  const totalW = cw + step * (n - 1);
-  let x = area.x + (area.w - totalW) / 2;
-  const y = area.y + (area.h - chh) / 2;
-  for (const code of codes) {
-    drawCard(ctx, { x, y, w: cw, h: chh }, code, faceUp, back);
-    x += step || cw + 4;
-  }
+  const rects = handRects(layout, area, codes.length);
+  codes.forEach((code, i) => {
+    const r = rects[i];
+    if (r) drawCard(ctx, r, code, faceUp, back);
+  });
 }

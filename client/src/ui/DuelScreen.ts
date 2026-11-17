@@ -11,6 +11,7 @@ import { LocalCore, SYSTEM_SCRIPTS, type LocalDeck } from '../core/LocalCore.ts'
 import { BoardRenderer } from '../render/BoardRenderer.ts';
 import { layoutField } from '../render/field.ts';
 import { drawBoard } from '../render/board.ts';
+import { handRects } from '../render/cards.ts';
 import { onAssetLoad, setFieldMat } from '../render/assets.ts';
 import { cardById, loadCards, toCardInfo, type Card } from '../data/carddb.ts';
 import { ScriptCache } from '../data/scripts.ts';
@@ -145,6 +146,80 @@ export class DuelScreen {
     const stage = this.root.querySelector('#d-stage') as HTMLElement;
     stage.addEventListener('mousemove', (e) => this.hover(e));
     stage.addEventListener('mouseleave', () => this.showZoom(0));
+    stage.addEventListener('click', (e) => this.onClick(e));
+  }
+
+  /* ---------------- 보드 클릭 (실제 듀얼처럼) ---------------- */
+  private onClick(e: MouseEvent): void {
+    if (!this.layout || !this.state || !this.prompt) return;
+    if (this.prompt.player !== 0) return;
+    const stage = this.root.querySelector('#d-stage') as HTMLElement;
+    const rect = stage.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const p = this.prompt;
+    const zoneAt = (): string | null => {
+      for (const [key, r] of Object.entries(this.layout!.zones)) {
+        if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return key;
+      }
+      return null;
+    };
+    const zoneKey = zoneAt();
+    const handIdx = (): number | null => {
+      const rects = handRects(this.layout!, this.layout!.hand.p0, this.state!.hand[0].length);
+      for (let i = rects.length - 1; i >= 0; i--) {
+        const r = rects[i]!;
+        if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return i;
+      }
+      return null;
+    };
+
+    /* 1) 메인 페이즈: 패 클릭 → 소환/세트 */
+    if (p.kind === 'idle') {
+      const hi = handIdx();
+      if (hi === null) return;
+      const summon = p.summon.findIndex((c) => c.loc & 0x02 && c.seq === hi);
+      if (summon >= 0) return this.respond(encodeIdle(0, summon));
+      const set = p.mset.findIndex((c) => c.loc & 0x02 && c.seq === hi);
+      if (set >= 0) return this.respond(encodeIdle(3, set));
+      return;
+    }
+
+    /* 2) 존 선택: 클릭으로 토글 */
+    if (p.kind === 'place') {
+      if (!zoneKey) return;
+      const cands = freeZones(p.flag, 99, p.player).map(
+        (z) => `${z.loc & LOC_M ? 'm' : 's'}${z.ctrl}-${z.seq}`,
+      );
+      const i = cands.indexOf(zoneKey);
+      if (i < 0) return;
+      if (this.sel.has(i)) this.sel.delete(i);
+      else if (this.sel.size < p.count) this.sel.add(i);
+      this.renderPrompt();
+      if (this.sel.size === p.count) {
+        const picked = [...this.sel].map((k) => cands[k]!);
+        const places = picked.map((k) => {
+          const [s, rest] = [k[0] === 'm' ? LOC_M : LOC_S, k.slice(1).split('-')];
+          return { ctrl: Number(rest[0]), loc: s, seq: Number(rest[1]) };
+        });
+        this.respond(encodePlaces(places));
+      }
+      return;
+    }
+
+    /* 3) 카드/제물/소재: 존 클릭으로 선택 */
+    if (p.kind === 'card' || p.kind === 'tribute') {
+      if (!zoneKey) return;
+      const idx = p.cards.findIndex((c) => {
+        const key = c.loc & LOC_M ? `m${c.ctrl & 1}-${c.seq}` : c.loc & LOC_S ? `s${c.ctrl & 1}-${c.seq}` : '';
+        return key === zoneKey;
+      });
+      if (idx < 0) return;
+      if (this.sel.has(idx)) this.sel.delete(idx);
+      else if (this.sel.size < p.max) this.sel.add(idx);
+      this.renderPrompt();
+      return;
+    }
   }
 
   /* ---------------- 카드 확대(호버) ---------------- */

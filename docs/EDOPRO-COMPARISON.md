@@ -63,6 +63,7 @@ HUD 텍스트만 우리 토큰(`render/theme.ts`)을 쓴다.
 | 카드 데이터 | `expansions/*.cdb` | `/data/cards.json` (22,654장, setcode 포함) | ✅ |
 | 스크립트 | `script/*.lua` (4,973) | `/data/script/<repo>/` + index | ✅ |
 | 선택 UI | 23종 프롬프트 | `duel/prompts.ts` 23종 | ✅ |
+| 입력 방식 | 보드/패를 **직접 클릭** | 패 클릭→소환·세트, 존 클릭→배치·대상 선택 (+버튼 패널) | ✅ |
 | 자동 상대 | WindBot(외부 프로세스) | 내장 `autoChoice` 정책 | ⚠️ 수준 낮음 |
 | 사이드 덱 교환 | 매치 사이 | 없음 | ❌ |
 | 덱 편집 | 덱 관리자(폴더·다중 덱) | 1개 덱(localStorage) + `.ydk` | ⚠️ |
