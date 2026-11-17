@@ -22,7 +22,7 @@
 | 존 하이라이트 | `textures/act.png`, `chain.png`, `attack.png`, `equip.png`, `mask.png` | `public/theme/` 에 복사만 | ❌ 미사용 |
 | LP 아이콘 | `textures/lp.png`, `lpf.png` (16×16) | 복사만 | ❌ 미사용 |
 | 폰트 | `fonts/` (EDOPro 전용 비트맵) | 시스템 폰트 | ⚠️ 의도적 대체 |
-| 사운드 | `sound/` (BGM·SE) | — | ❌ |
+| 사운드 | `sound/` (BGM·SE) | **원본 SE 8종**(draw/nextturn/phase/damage/gainlp/activate/set/attack) + 소리 토글 | ⚠️ BGM 없음 |
 | 스킨 | `skin/` | — | ❌ |
 
 **규칙**: 매트·카드·뒷면·배경은 **원본 파일을 그대로** 쓴다(색을 새로 만들지 않는다).

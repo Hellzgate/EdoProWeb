@@ -13,6 +13,7 @@ import { layoutField } from '../render/field.ts';
 import { drawBoard } from '../render/board.ts';
 import { handRects } from '../render/cards.ts';
 import { onAssetLoad, setFieldMat } from '../render/assets.ts';
+import { playSfx, preloadSfx, setSfxEnabled, sfxEnabled } from './sfx.ts';
 import { cardById, loadCards, toCardInfo, type Card } from '../data/carddb.ts';
 import { ScriptCache } from '../data/scripts.ts';
 import {
@@ -122,6 +123,7 @@ export class DuelScreen {
             <label class="tag"><input id="d-auto" type="checkbox" /> 내 턴도 자동</label>
             <button id="d-stop">중지</button>
             <button id="d-save" disabled>리플레이 저장</button>
+            <button id="d-sfx">소리 켜짐</button>
             <button id="d-surrender" disabled>항복</button>
             <span class="d-seg" id="d-chain">
               <button data-chain="on" class="on">체인 ON</button>
@@ -150,6 +152,7 @@ export class DuelScreen {
       </div>`;
     this.bind();
     this.setupCanvas();
+    preloadSfx();
     onAssetLoad(() => this.render());
     requestAnimationFrame(() => this.resize());
     const stage = this.root.querySelector('#d-stage') as HTMLElement;
@@ -289,6 +292,16 @@ export class DuelScreen {
       }
     });
     this.$('d-stop').addEventListener('click', () => this.stop());
+    const sfxBtn = this.$('d-sfx');
+    const sfxSaved = localStorage.getItem('edopro.sfx');
+    if (sfxSaved === 'off') setSfxEnabled(false);
+    sfxBtn.textContent = sfxEnabled() ? '소리 켜짐' : '소리 꺼짐';
+    sfxBtn.addEventListener('click', () => {
+      const on = !sfxEnabled();
+      setSfxEnabled(on);
+      localStorage.setItem('edopro.sfx', on ? 'on' : 'off');
+      sfxBtn.textContent = on ? '소리 켜짐' : '소리 꺼짐';
+    });
     this.$('d-save').addEventListener('click', () => this.saveReplay());
     this.$('d-surrender').addEventListener('click', () => {
       if (!this.core) return;
@@ -414,7 +427,9 @@ export class DuelScreen {
   private wire(): void {
     const core = this.core!;
     core.on('state', (st) => {
+      const prev = this.state?.lastEvent ?? '';
       this.state = st;
+      if (st.lastEvent !== prev) this.soundFor(st.lastEvent);
       this.render();
     });
     core.on('need', (n) => this.onNeed(n.type, n.payload));
@@ -425,8 +440,20 @@ export class DuelScreen {
     core.on('error', (e) => this.pushLog(`오류: ${e.message}`));
   }
 
-  private stop(): void {
-    this.core?.dispose();
+  /** 상태 이벤트 → 원본 SE */
+  private soundFor(ev: string): void {
+    if (!ev) return;
+    if (ev.startsWith('TURN')) return playSfx('nextturn');
+    if (ev.startsWith('PHASE')) return playSfx('phase');
+    if (ev.startsWith('DRAW')) return playSfx('draw');
+    if (ev.startsWith('SUMMON') || ev.startsWith('SPSUMMON')) return playSfx('set');
+    if (ev.startsWith('SET')) return playSfx('set');
+    if (ev.startsWith('CHAIN')) return playSfx('activate');
+    if (ev.startsWith('DMG')) return playSfx('damage');
+    if (ev.startsWith('RECOVER')) return playSfx('gainlp');
+  }
+
+  private stop(): void {    this.core?.dispose();
     this.core = null;
     this.started = false;
     this.prompt = null;
