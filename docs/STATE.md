@@ -102,6 +102,9 @@ python tools/patch-cards-meta.py                   # setcodes 등 주입
 
 ## 8. 다음 작업
 
+> **전체 목록·절차는 `docs/REMAINING.md`** (P3 온라인 설계·선행 결정·구현 순서·검증 포함).
+> 요약: ①P3 온라인(브리지 서버 결정 필요) ②사이드 덱 ③퍼즐 ④사운드 확장 ⑤UI 마감 ⑥AI 심화 ⑦성능·CI
+
 ### P3 온라인 (RemoteCore)
 - 기존 포팅(`edopro-web:1.25.5` :7556)의 `/ws` 브리지 참고
 - `JoinGame` 41.0 · `STOC_*`/`CTOS_*` 를 `ICore` 이벤트로 매핑 (상태기계는 이미 공유)
