@@ -161,7 +161,8 @@ export function applyPacket(s: DuelState, p: ReplayPacket): void {
       s.turn++;
       s.phase = 0;
       s.chain = [];
-      s.activePlayer = readU16(d, 0) === 1 ? 1 : 0;
+      // 실측(processor.cpp): u8 turn_player  ← u16 로 읽으면 1바이트 페이로드에서 항상 0 이 된다
+      s.activePlayer = readU8(d, 0) & 1;
       s.lastEvent = 'TURN ' + s.turn + ' (P' + (s.activePlayer + 1) + ')';
       break;
     }
@@ -171,10 +172,11 @@ export function applyPacket(s: DuelState, p: ReplayPacket): void {
       break;
     }
     case MSG.DRAW: {
+      // 실측(operations.cpp): u8 player · **u32 count** · (u32 code + u32 position)×count
       const who = readU8(d, 0) & 1;
-      const n = readU8(d, 1);
+      const n = readU32(d, 1);
       for (let i = 0; i < n; i++) {
-        const off = 2 + i * 8;
+        const off = 5 + i * 8;
         if (off + 4 > d.length) break;
         const code = readU32(d, off);
         s.deck[who] = Math.max(0, s.deck[who] - 1);

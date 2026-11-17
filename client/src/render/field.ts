@@ -1,11 +1,18 @@
 /**
- * 필드 좌표 계산 — 유희왕 표준 배치(docs/YGO-FIELD-LAYOUT.md).
+ * 필드 좌표 — **원본 EDOPro 와 동일**.
  *
- *  내 진영(아래) 좌→우: [엑덱][필드][ST×5][묘지][덱]
- *  몬스터 줄:            [ MZ×5 ]  위에 EMZ 2칸(2·4열, 양쪽 공유)
- *  상대 진영은 180° 회전(좌우 반전).
+ * 근거: gframe/materials.cpp (SetS3DVertex) — 필드 월드 좌표계 x∈[-1,9], y∈[-4,4] (10×8).
+ *   몬스터 존 : x = 1.2 + i*1.1 … 2.3 + i*1.1, y = 0.8 … 2.0
+ *   마함 존   : 같은 x,                         y = 2.0 … 3.2
+ *   EMZ       : x 2.3…3.4 / 4.5…5.6,            y = -0.6 … 0.6
+ *   필드마법  : x 0.2…1.0,                       y = 0.1 … 1.3
+ *   엑스트라  : x 0.2…1.0,                       y = 2.7 … 3.9
+ *   덱        : x 6.9…7.7,                       y = 2.7 … 3.9
+ *   묘지      : x 6.9…7.7,                       y = 0.1 … 1.3
+ *   제외      : x 7.9…8.7,                       y = 0.1 … 1.3
+ *
+ * 플레이어 1(상대)은 **y 만 반전**(180° 회전하면 덱/엑덱이 반대로 가므로 EDOPro 와 같이 y 반전).
  */
-import type { DuelState } from '../engine/state.ts';
 import type { Quad } from './BoardRenderer.ts';
 
 export interface Rect {
@@ -16,117 +23,85 @@ export interface Rect {
 }
 
 export interface FieldLayout {
+  /** field.png 를 그릴 사각형 */
+  field: Rect;
   cardW: number;
   cardH: number;
-  zones: Record<string, Rect>; // 'm0-0' … 'm0-6'(5·6=EMZ), 's0-0'…'s0-5'(5=필드)
-  piles: Record<string, Rect>; // deck/extra/gy/banished (side 0/1)
+  zones: Record<string, Rect>;
+  piles: Record<string, Rect>;
+  hand: { p0: Rect; p1: Rect };
   quads: Quad[];
 }
 
-const COLORS = {
-  emptyM: [0.075, 0.125, 0.165] as [number, number, number],
-  emptyS: [0.055, 0.09, 0.12] as [number, number, number],
-  emptyEmz: [0.09, 0.075, 0.15] as [number, number, number],
-  field: [0.07, 0.13, 0.1] as [number, number, number],
-  pile: [0.06, 0.09, 0.11] as [number, number, number],
-  card: [0.19, 0.31, 0.47] as [number, number, number],
-  set: [0.15, 0.22, 0.33] as [number, number, number],
-  pend: [0.35, 0.2, 0.42] as [number, number, number],
-};
+/* EDOPro 월드 좌표(플레이어 0 기준) */
+type Box = [number, number, number, number]; // x1, y1, x2, y2
+const WORLD = { x0: -1, x1: 9, y0: -4, y1: 4 };
 
-/** 카드 한 칸 크기 — 화면 폭에 맞춰 8.4칸 + 여백이 들어가게. */
-export function cardSize(w: number): { cw: number; ch: number; gap: number } {
-  const gap = 8;
-  const cw = Math.max(34, Math.min(64, (w - 56 - gap * 8) / 8.4));
-  const ch = Math.round(cw * 1.42);
-  return { cw, ch, gap };
-}
+const MZONE = (i: number): Box => [1.2 + i * 1.1, 0.8, 2.3 + i * 1.1, 2.0];
+const SZONE = (i: number): Box => [1.2 + i * 1.1, 2.0, 2.3 + i * 1.1, 3.2];
+const EMZ: Box[] = [
+  [2.3, -0.6, 3.4, 0.6],
+  [4.5, -0.6, 5.6, 0.6],
+];
+const FIELD_SPELL: Box = [0.2, 0.1, 1.0, 1.3];
+const EXTRA: Box = [0.2, 2.7, 1.0, 3.9];
+const DECK: Box = [6.9, 2.7, 7.7, 3.9];
+const GRAVE: Box = [6.9, 0.1, 7.7, 1.3];
+const BANISHED: Box = [7.9, 0.1, 8.7, 1.3];
+
+const mirrorY = (b: Box): Box => [b[0], -b[3], b[2], -b[1]];
 
 export function layoutField(w: number, h: number): FieldLayout {
-  const { cw, ch, gap } = cardSize(w);
-  const midX = w / 2;
+  const m = 6;
+  const handH = Math.max(42, Math.min(112, h * 0.155));
+  const fieldAreaH = Math.max(80, h - handH * 2 - m * 2);
+  const s = Math.min((w - m * 2) / 10, fieldAreaH / 8);
+  const fieldW = 10 * s;
+  const fieldH = 8 * s;
+  const fieldX = (w - fieldW) / 2;
+  const fieldY = handH + m + (fieldAreaH - fieldH) / 2;
+
+  const toRect = (b: Box): Rect => ({
+    x: fieldX + (b[0] - WORLD.x0) * s,
+    y: fieldY + (b[1] - WORLD.y0) * s,
+    w: (b[2] - b[0]) * s,
+    h: (b[3] - b[1]) * s,
+  });
+
   const zones: Record<string, Rect> = {};
   const piles: Record<string, Rect> = {};
-  const quads: Quad[] = [];
 
-  // 한 줄에 8칸(엑덱·필드·ST5·묘지·덱) → 폭
-  const rowW = cw * 8 + gap * 7;
-  const left = Math.round(midX - rowW / 2);
+  for (let side = 0; side <= 1; side++) {
+    const f = (b: Box) => toRect(side === 0 ? b : mirrorY(b));
+    for (let i = 0; i < 5; i++) zones[`m${side}-${i}`] = f(MZONE(i));
+    for (let i = 0; i < 5; i++) zones[`s${side}-${i}`] = f(SZONE(i));
+    zones[`s${side}-5`] = f(FIELD_SPELL);
+    piles[`deck-${side}`] = f(DECK);
+    piles[`extra-${side}`] = f(EXTRA);
+    piles[`gy-${side}`] = f(GRAVE);
+    piles[`ban-${side}`] = f(BANISHED);
+  }
+  // EMZ 는 공유 — 플레이어 0 기준 사각형을 양쪽이 같이 쓴다
+  for (let k = 0; k < 2; k++) {
+    const r = toRect(EMZ[k]!);
+    zones[`m0-${5 + k}`] = r;
+    zones[`m1-${5 + k}`] = r;
+  }
 
-  const colX = (i: number) => left + i * (cw + gap);
-
-  // 세로 배치: 상대(위) / 나(아래)
-  // [상대] ST줄 / MZ줄 / (EMZ) / MZ줄 / ST줄  … EMZ 는 두 MZ 줄 사이
-  const topSt = 40;
-  const topMz = topSt + ch + gap;
-  const bottomSt = h - 40 - ch;
-  const bottomMz = bottomSt - ch - gap;
-
-  const put = (side: number, key: string, r: Rect, color: [number, number, number], depth: number) => {
-    zones[key] = r;
-    quads.push({ ...r, depth, color });
+  const field: Rect = { x: fieldX, y: fieldY + 0, w: fieldW, h: fieldH };
+  const hand = {
+    p1: { x: fieldX, y: 0, w: fieldW, h: handH },
+    p0: { x: fieldX, y: h - handH, w: fieldW, h: handH },
   };
 
-  for (let side = 0; side <= 1; side++) {
-    const stY = side === 0 ? bottomSt : topSt;
-    const mzY = side === 0 ? bottomMz : topMz;
-    const depth = side === 0 ? 0 : 1;
-
-    // 좌우 반전: 상대는 열 순서를 뒤집는다(엑덱 ↔ 덱)
-    const px = (i: number) => (side === 0 ? colX(i) : colX(7 - i));
-
-    // 마함 줄: [0]=엑덱 [1]=필드 [2..6]=ST [7]=덱  … 묘지/제외는 ST 오른쪽 여백에 겹쳐 그린다
-    piles[`extra-${side}`] = { x: px(0), y: stY, w: cw, h: ch };
-    put(side, `s${side}-5`, { x: px(1), y: stY, w: cw, h: ch }, COLORS.field, depth); // 필드 마법
-    for (let i = 0; i < 5; i++) put(side, `s${side}-${i}`, { x: px(2 + i), y: stY, w: cw, h: ch }, COLORS.emptyS, depth);
-    piles[`deck-${side}`] = { x: px(7), y: stY, w: cw, h: ch };
-    const gyY = side === 0 ? stY + ch + 6 : stY - Math.round(ch * 0.45) - 6;
-    piles[`gy-${side}`] = { x: px(7), y: gyY, w: cw * 0.62, h: Math.round(ch * 0.45) };
-    piles[`ban-${side}`] = { x: px(7) + cw * 0.62 + 4, y: gyY, w: cw * 0.62, h: Math.round(ch * 0.45) };
-
-    // 몬스터 줄: ST 5칸과 같은 열 정렬(2..6)
-    for (let i = 0; i < 5; i++) put(side, `m${side}-${i}`, { x: px(2 + i), y: mzY, w: cw, h: ch }, COLORS.emptyM, depth);
-  }
-
-  // EMZ 2칸은 **양쪽 공유** — 두 몬스터 줄 사이(중앙)에 한 번만 그린다.
-  const emzY = Math.round((topMz + ch + bottomMz) / 2 - ch / 2);
-  put(0, 'm0-5', { x: colX(3), y: emzY, w: cw, h: ch }, COLORS.emptyEmz, 0);
-  put(0, 'm0-6', { x: colX(5), y: emzY, w: cw, h: ch }, COLORS.emptyEmz, 0);
-  // 상대 상태가 EMZ 를 쓰면 같은 사각형을 공유한다(데이터는 mzone[side][5·6]).
-  zones['m1-5'] = zones['m0-5']!;
-  zones['m1-6'] = zones['m0-6']!;
-
-  return { cardW: cw, cardH: ch, zones, piles, quads };
-}
-
-/** 상태를 반영한 최종 쿼드 목록(빈 칸 위에 카드 색을 덮는다). */
-export function paintState(layout: FieldLayout, s: DuelState): Quad[] {
-  const out = layout.quads.slice();
-  const byKey = new Map<string, Quad>();
-  for (const q of out) byKey.set(`${q.x},${q.y},${q.w}`, q);
-
-  for (let side = 0; side <= 1; side++) {
-    const depth = side === 0 ? 0 : 1;
-    for (let i = 0; i < 7; i++) {
-      const code = s.mzone[side][i];
-      if (code === null) continue;
-      const r = layout.zones[`m${side}-${i}`];
-      if (r) out.push({ ...r, depth, color: COLORS.card });
-    }
-    for (let i = 0; i < 6; i++) {
-      const code = s.szone[side][i];
-      if (code === null) continue;
-      const r = layout.zones[`s${side}-${i}`];
-      if (r) out.push({ ...r, depth, color: i === 5 ? COLORS.field : COLORS.set });
-    }
-    // 펜듈럼 존(마함 0/4)에 펜듈럼 몬스터가 있으면 보라 테두리 → 별도 쿼드로 표시
-    for (const i of [0, 4]) {
-      const code = s.szone[side][i];
-      if (code === null) continue;
-      const r = layout.zones[`s${side}-${i}`];
-      if (!r) continue;
-      out.push({ x: r.x, y: r.y, w: r.w, h: 5, depth, color: COLORS.pend });
-    }
-  }
-  return out;
+  const mz0 = MZONE(0);
+  return {
+    field,
+    cardW: (mz0[2] - mz0[0]) * s,
+    cardH: (mz0[3] - mz0[1]) * s,
+    zones,
+    piles,
+    hand,
+    quads: [],
+  };
 }

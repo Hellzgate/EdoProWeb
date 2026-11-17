@@ -5,9 +5,14 @@
 
 ## 1. 한 줄 상태
 
-**P2 완료** — 브라우저에서 **실제 듀얼이 끝까지 돈다**(상대 자동).
-실측: `TURN 15 · WIN P1 · LP 8000/0 · 패킷 894 · RETRY 0 · 콘솔 오류 0`
+**P2 완료 + 원본 EDOPro 자산 적용** — 브라우저에서 실제 듀얼이 끝까지 돌고, 필드는 **원본 `field3.png` 매트 + 실제 카드 이미지(18,962장)** 로 그린다.
+실측: `TURN 15 · WIN P1 · LP 8000/0 · 패킷 894 · RETRY 0`
 **다음 = P3(온라인 RemoteCore)** 또는 선택 UI 정교화.
+
+### 1.1 최근 추가 (v0.9.5)
+- 필드: `field3.png` 매트 + `bg.png` 배경 + 좌표는 `gframe/materials.cpp` 실측값 (→ `docs/YGO-FIELD-LAYOUT.md` §7)
+- 카드: `pics/<id>.jpg` (볼륨 `~/edopro-data/pics`, 18,962장 534MB) · 덱/엑덱 뒷면 `cover2/cover.png`
+- 상태기계 버그 수정: `MSG_DRAW` count 는 **u32**(핸드 코드 깨짐), `MSG_NEW_TURN` player 는 **u8**, `MSG_SET` 은 loc_info 1개(MOVE 와 다름)
 
 ## 2. 지금 되는 것 (배포본 http://192.168.0.53:7560/)
 

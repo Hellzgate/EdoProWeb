@@ -6,7 +6,9 @@ import { parseYrpx, type ReplayPacket } from './engine/yrpx.ts';
 import { phaseName, type DuelState } from './engine/state.ts';
 import { ReplayCore } from './core/ReplayCore.ts';
 import { BoardRenderer } from './render/BoardRenderer.ts';
-import { layoutField, paintState } from './render/field.ts';
+import { layoutField } from './render/field.ts';
+import { drawBoard } from './render/board.ts';
+import { onAssetLoad } from './render/assets.ts';
 import { DeckEditor } from './ui/DeckEditor.ts';
 import { DataPanel } from './ui/DataPanel.ts';
 import { DuelScreen } from './ui/DuelScreen.ts';
@@ -38,7 +40,7 @@ let speed = 20;
 
 function stageSize(): { w: number; h: number } {
   const w = Math.max(380, $('stage').clientWidth);
-  return { w, h: Math.round(Math.min(620, Math.max(420, w * 0.52))) };
+  return { w, h: Math.round(Math.min(900, Math.max(440, w * 0.8))) };
 }
 
 function setup(): void {
@@ -65,98 +67,15 @@ function draw(): void {
   if (!fx) return;
   const { w, h } = stageSize();
   const layout = layoutField(w, h);
-  gl.draw(state ? paintState(layout, state) : layout.quads);
+  gl.draw([]);
 
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   fx.save();
   fx.scale(dpr, dpr);
-  fx.clearRect(0, 0, w, h);
-  fx.font = '600 12.5px system-ui, "Malgun Gothic", sans-serif';
-  fx.textBaseline = 'middle';
-
-  const s = state;
-  const L = layout;
-
-  const label = (side: number, text: string, align: 'left' | 'right') => {
-    const p = L.piles[`deck-${side}`]!;
-    fx.fillStyle = side === 0 ? 'rgba(220,235,255,0.92)' : 'rgba(190,205,228,0.8)';
-    fx.textAlign = align;
-    const y = side === 0 ? p.y + L.cardH + 14 : p.y - 14;
-    fx.fillText(text, align === 'left' ? L.piles[`extra-${side}`]!.x : p.x + p.w, y);
-  };
-
-  if (s) {
-    for (let side = 0; side <= 1; side++) {
-      label(
-        side,
-        `${side === 0 ? '나' : '상대'}  LP ${s.lp[side]} · 덱 ${s.deck[side]} · 엑덱 ${s.extra[side]} · 패 ${s.hand[side].length} · 묘지 ${s.grave[side].length} · 제외 ${s.banished[side].length}`,
-        'left',
-      );
-      if (names[side]) {
-        const p = L.piles[`deck-${side}`]!;
-        fx.fillStyle = 'rgba(140,160,190,0.85)';
-        fx.textAlign = side === 0 ? 'right' : 'left';
-        fx.fillText(names[side], side === 0 ? p.x + p.w : p.x, side === 0 ? p.y + L.cardH + 14 : p.y - 14);
-      }
-    }
-
-    // 카드 코드 / SET / 펜듈럼 표시
-    fx.font = '9px ui-monospace, Consolas, monospace';
-    fx.textAlign = 'center';
-    for (let side = 0; side <= 1; side++) {
-      for (let i = 0; i < 7; i++) {
-        const code = s.mzone[side][i];
-        if (code === null) continue;
-        const r = L.zones[`m${side}-${i}`];
-        if (!r) continue;
-        fx.fillStyle = i >= 5 ? 'rgba(190,170,255,0.95)' : 'rgba(210,230,255,0.95)';
-        fx.fillText(String(code).slice(-6), r.x + r.w / 2, r.y + r.h / 2);
-      }
-      for (let i = 0; i < 6; i++) {
-        const code = s.szone[side][i];
-        if (code === null) continue;
-        const r = L.zones[`s${side}-${i}`];
-        if (!r) continue;
-        fx.fillStyle = i === 5 ? 'rgba(150,230,190,0.9)' : 'rgba(150,180,220,0.85)';
-        fx.fillText(i === 5 ? 'FIELD' : 'SET', r.x + r.w / 2, r.y + r.h / 2);
-      }
-    }
-
-    // 더미 위 장수
-    fx.font = '600 11px ui-monospace, Consolas, monospace';
-    const pile = (side: number, key: string, text: string, color: string) => {
-      const r = L.piles[`${key}-${side}`];
-      if (!r) return;
-      fx.fillStyle = 'rgba(0,0,0,0.45)';
-      fx.fillRect(r.x + 2, r.y + r.h - 15, r.w - 4, 13);
-      fx.fillStyle = color;
-      fx.fillText(text, r.x + r.w / 2, r.y + r.h - 8);
-    };
-    for (let side = 0; side <= 1; side++) {
-      pile(side, 'deck', String(s.deck[side]), 'rgba(200,225,255,0.95)');
-      pile(side, 'extra', String(s.extra[side]), 'rgba(190,190,255,0.9)');
-      pile(side, 'gy', String(s.grave[side].length), 'rgba(255,200,200,0.85)');
-      pile(side, 'ban', String(s.banished[side].length), 'rgba(230,200,255,0.85)');
-    }
-
-    // 중앙 상태
-    fx.font = '600 13px ui-monospace, Consolas, monospace';
-    fx.fillStyle = 'rgba(111,211,195,0.95)';
-    fx.textAlign = 'center';
-    fx.fillText(`TURN ${s.turn} · ${phaseName(s.phase)}`, w / 2, h / 2 - 6);
-    if (s.chain.length) {
-      fx.font = '11px ui-monospace, Consolas, monospace';
-      fx.fillStyle = 'rgba(255,255,255,0.72)';
-      fx.fillText(s.chain.map((c) => c.code).join(' > '), w / 2, h / 2 + 12);
-    }
-    if (s.winner !== null) {
-      fx.font = '600 15px system-ui, sans-serif';
-      fx.fillStyle = 'rgba(255,220,140,0.95)';
-      fx.fillText(`WIN · P${s.winner + 1}`, w / 2, h / 2 + 34);
-    }
-  }
+  drawBoard(fx, w, h, layout, state, { names });
   fx.restore();
 }
+
 
 function setName(id: string, v: string): void {
   $(id).textContent = v;
@@ -233,6 +152,7 @@ function togglePlay(): void {
 
 function boot(): void {
   setup();
+  onAssetLoad(() => draw());
   setName('hint', '리플레이(.json) 를 선택하세요');
 
   let deck: DeckEditor | null = null;

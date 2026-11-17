@@ -39,7 +39,7 @@ export class BoardRenderer {
   private data: number[] = [];
 
   constructor(private canvas: HTMLCanvasElement) {
-    const gl = canvas.getContext('webgl2', { antialias: true, alpha: false });
+    const gl = canvas.getContext('webgl2', { antialias: true, alpha: true, premultipliedAlpha: false });
     if (!gl) throw new Error('WebGL2 를 사용할 수 없습니다');
     this.gl = gl;
 
@@ -76,24 +76,26 @@ export class BoardRenderer {
   }
 
   private rect(x: number, y: number, w: number, h: number, depth: number, c: [number, number, number]): void {
-    // 2.5D: 먼 쪽은 작아지고 위로 살짝 눌린다(투시 근사)
-    const k = 1 - 0.16 * depth;
-    const cx = x + w / 2;
-    const cy = y + h / 2;
-    const hw = (w * k) / 2;
-    const hh = (h * k) / 2;
-    const skew = 0.06 * depth; // 사다리꼴
-    const topHW = hw * (1 - skew);
+    // 평면 보드(레퍼런스와 동일) — depth 는 밝기 차등에만 쓴다.
+    //  (이전 2.5D 원근은 행이 겹쳐 보이는 원인이었다)
+    const shade = depth === 0 ? 1 : 0.72;
+    const col: [number, number, number] = [c[0] * shade, c[1] * shade, c[2] * shade];
     const pts: Array<[number, number]> = [
-      [cx - topHW, cy - hh],
-      [cx + topHW, cy - hh],
-      [cx + hw, cy + hh],
-      [cx - hw, cy + hh],
+      [x, y],
+      [x + w, y],
+      [x + w, y + h],
+      [x, y + h],
     ];
     const tri = [0, 1, 2, 0, 2, 3];
     for (const i of tri) {
       const p = pts[i]!;
-      this.data.push(p[0] * (this.canvas.width / parseFloat(this.canvas.style.width || '1')), p[1] * (this.canvas.height / parseFloat(this.canvas.style.height || '1')), c[0], c[1], c[2]);
+      this.data.push(
+        p[0] * (this.canvas.width / parseFloat(this.canvas.style.width || '1')),
+        p[1] * (this.canvas.height / parseFloat(this.canvas.style.height || '1')),
+        col[0],
+        col[1],
+        col[2],
+      );
     }
   }
 
@@ -103,7 +105,7 @@ export class BoardRenderer {
     for (const q of quads) this.rect(q.x, q.y, q.w, q.h, q.depth, q.color);
 
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
-    gl.clearColor(0.027, 0.067, 0.059, 1);
+    gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
     if (!this.data.length) return;
 

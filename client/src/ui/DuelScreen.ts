@@ -9,7 +9,9 @@
 import { phaseName, type DuelState } from '../engine/state.ts';
 import { LocalCore, SYSTEM_SCRIPTS, type LocalDeck } from '../core/LocalCore.ts';
 import { BoardRenderer } from '../render/BoardRenderer.ts';
-import { layoutField, paintState } from '../render/field.ts';
+import { layoutField } from '../render/field.ts';
+import { drawBoard } from '../render/board.ts';
+import { onAssetLoad } from '../render/assets.ts';
 import { cardById, loadCards, toCardInfo, type Card } from '../data/carddb.ts';
 import { ScriptCache } from '../data/scripts.ts';
 import {
@@ -92,6 +94,7 @@ export class DuelScreen {
       </div>`;
     this.bind();
     this.setupCanvas();
+    onAssetLoad(() => this.render());
     requestAnimationFrame(() => this.resize());
   }
 
@@ -528,7 +531,7 @@ export class DuelScreen {
     const stage = this.root.querySelector('#d-stage') as HTMLElement;
     if (!stage) return;
     const w = Math.max(360, stage.clientWidth);
-    const h = Math.round(Math.min(600, Math.max(400, w * 0.52)));
+    const h = Math.round(Math.min(900, Math.max(440, w * 0.8)));
     stage.style.height = h + 'px';
     this.gl.resize(w, h);
     const c = this.root.querySelector('#d-fx') as HTMLCanvasElement;
@@ -547,83 +550,13 @@ export class DuelScreen {
     const w = Math.max(360, stage.clientWidth);
     const h = Number(stage.style.height.replace('px', '')) || 420;
     const layout = layoutField(w, h);
-    this.gl?.draw(this.state ? paintState(layout, this.state) : layout.quads);
+    this.gl?.draw([]);
 
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     const fx = this.fx;
     fx.save();
     fx.scale(dpr, dpr);
-    fx.clearRect(0, 0, w, h);
-    fx.textBaseline = 'middle';
-    fx.textAlign = 'center';
-
-    const s = this.state;
-    if (s) {
-      fx.font = '9px ui-monospace, Consolas, monospace';
-      for (let side = 0; side <= 1; side++) {
-        for (let i = 0; i < 7; i++) {
-          const code = s.mzone[side][i];
-          if (code === null) continue;
-          const r = layout.zones[`m${side}-${i}`];
-          if (!r) continue;
-          fx.fillStyle = i >= 5 ? 'rgba(190,170,255,0.95)' : 'rgba(210,230,255,0.95)';
-          fx.fillText(String(code).slice(-6), r.x + r.w / 2, r.y + r.h / 2);
-        }
-        for (let i = 0; i < 6; i++) {
-          const code = s.szone[side][i];
-          if (code === null) continue;
-          const r = layout.zones[`s${side}-${i}`];
-          if (!r) continue;
-          fx.fillStyle = i === 5 ? 'rgba(150,230,190,0.9)' : 'rgba(150,180,220,0.85)';
-          fx.fillText(i === 5 ? 'FIELD' : 'SET', r.x + r.w / 2, r.y + r.h / 2);
-        }
-      }
-      // 좌우 정보 + 더미 장수
-      fx.font = '600 12px system-ui, "Malgun Gothic", sans-serif';
-      for (let side = 0; side <= 1; side++) {
-        const deckRect = layout.piles[`deck-${side}`];
-        const extraRect = layout.piles[`extra-${side}`];
-        if (!deckRect || !extraRect) continue;
-        const y = side === 0 ? deckRect.y + deckRect.h + 14 : deckRect.y - 14;
-        fx.fillStyle = side === 0 ? 'rgba(220,235,255,0.92)' : 'rgba(190,205,228,0.8)';
-        fx.textAlign = 'left';
-        fx.fillText(
-          `${side === 0 ? '나' : '상대'}  LP ${s.lp[side]} · 덱 ${s.deck[side]} · 엑덱 ${s.extra[side]} · 패 ${s.hand[side].length} · 묘지 ${s.grave[side].length} · 제외 ${s.banished[side].length}`,
-          extraRect.x,
-          y,
-        );
-      }
-      fx.font = '600 11px ui-monospace, Consolas, monospace';
-      fx.textAlign = 'center';
-      const pile = (side: number, key: string, text: string, color: string) => {
-        const r = layout.piles[`${key}-${side}`];
-        if (!r) return;
-        fx.fillStyle = 'rgba(0,0,0,0.45)';
-        fx.fillRect(r.x + 2, r.y + r.h - 15, r.w - 4, 13);
-        fx.fillStyle = color;
-        fx.fillText(text, r.x + r.w / 2, r.y + r.h - 8);
-      };
-      for (let side = 0; side <= 1; side++) {
-        pile(side, 'deck', String(s.deck[side]), 'rgba(200,225,255,0.95)');
-        pile(side, 'extra', String(s.extra[side]), 'rgba(190,190,255,0.9)');
-        pile(side, 'gy', String(s.grave[side].length), 'rgba(255,200,200,0.85)');
-        pile(side, 'ban', String(s.banished[side].length), 'rgba(230,200,255,0.85)');
-      }
-
-      fx.font = '600 12px ui-monospace, Consolas, monospace';
-      fx.fillStyle = 'rgba(111,211,195,0.95)';
-      fx.fillText(`TURN ${s.turn} · ${phaseName(s.phase)}`, w / 2, h / 2 - 8);
-      if (s.chain.length) {
-        fx.font = '10px ui-monospace, Consolas, monospace';
-        fx.fillStyle = 'rgba(255,255,255,0.7)';
-        fx.fillText(s.chain.map((c) => c.code).join(' > '), w / 2, h / 2 + 10);
-      }
-      if (s.winner !== null) {
-        fx.font = '600 15px system-ui, sans-serif';
-        fx.fillStyle = 'rgba(255,220,140,0.95)';
-        fx.fillText(`WIN · P${s.winner + 1}`, w / 2, h / 2 + 32);
-      }
-    }
+    drawBoard(fx, w, h, layout, this.state, { names: ['나', '상대'] });
     fx.restore();
 
     this.renderStatus();
