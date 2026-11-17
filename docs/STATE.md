@@ -10,10 +10,12 @@
 최신 v0.9.8: 카드 표시형식(수비 회전/세트 뒷면) · 카드 호버 확대(미검증) · 렌더 모듈화.
 **다음 = P3(온라인 RemoteCore)** 또는 나머지 격차(EDOPRO-COMPARISON.md §5).
 
-### 1.1 최근 추가 (v0.9.5)
-- 필드: `field3.png` 매트 + `bg.png` 배경 + 좌표는 `gframe/materials.cpp` 실측값 (→ `docs/YGO-FIELD-LAYOUT.md` §7)
-- 카드: `pics/<id>.jpg` (볼륨 `~/edopro-data/pics`, 18,962장 534MB) · 덱/엑덱 뒷면 `cover2/cover.png`
-- 상태기계 버그 수정: `MSG_DRAW` count 는 **u32**(핸드 코드 깨짐), `MSG_NEW_TURN` player 는 **u8**, `MSG_SET` 은 loc_info 1개(MOVE 와 다름)
+### 1.1 최근 추가 (v0.9.12)
+- 필드: `field3.png` 매트 + `bg.png` 배경 + `materials.cpp` 실측 좌표 (→ `YGO-FIELD-LAYOUT.md` §7) · **매트 선택**(field/2/3/4)
+- 카드: `pics/<id>.jpg` 18,962장 · 뒷면 `cover2/cover.png`
+- 표시: **수비 회전 · 세트 뒷면**(`mpos/spos`) · **체인 번호 배지** · **카운터 배지** · **펜듈럼 스케일** · **선택 대상 존 강조** · **호버 확대**
+- 상태기계: `MSG_DRAW` count u32 · `MSG_NEW_TURN` u8 · `MSG_SET` loc_info 1개 · `MSG_POS_CHANGE`/`FLIPSUMMONING`/`ADD·REMOVE_COUNTER` 처리
+- 렌더 모듈화: `field / cards / hud / theme / assets / board`
 
 ## 2. 지금 되는 것 (배포본 http://192.168.0.53:7560/)
 
