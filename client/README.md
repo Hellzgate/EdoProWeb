@@ -67,3 +67,28 @@ tools/scan.ts · tools/export.ts · tools/gen-msg.ts
 1. **ocgcore WASM 빌드 산출물** — 미니PC `~/edo-src` 의 `core+lua` 오브젝트를 이 리포에 넣거나 CI로 빌드(`build-web-pthread.sh` 참고, 단 pthread 불필요)
 2. **cdb → 카드 인덱스(샤드)** — 덱 편집기(P4)용. `cards.cdb` 읽기 스크립트 필요
 3. **Gateway 규격 확정** — 멀티롤 7914 프론트의 `JOIN/CREATE` 레이아웃(기존 포팅 `docker/server.py` 참조)
+
+## 배포 (미니PC 도커)
+
+`ash
+# PC 에서 빌드 후
+npm run build
+scp -O Dockerfile nginx.conf mini:~/edopro-client/
+scp -O -r dist mini:~/edopro-client/
+
+# 미니PC 에서
+cd ~/edopro-client
+docker build -t edopro-client:0.1.0 .
+docker rm -f edopro-client || true
+docker run -d --name edopro-client --restart unless-stopped -p 7560:80 edopro-client:0.1.0
+`
+
+| 항목 | 값 (실측 2026-11-17) |
+|---|---|
+| 이미지 | `edopro-client:0.1.0` **93.8MB** (nginx:alpine + dist) |
+| 주소 | `http://192.168.0.53:7560/` |
+| 엔드포인트 | `/healthz` 200 · `/` 200 · `/sw.js` 200 · `/manifest.webmanifest` 200 |
+| 브라우저 | WebGL2 ✅ · manifest ✅ · 콘솔 오류 0 |
+
+> ⚠ **서비스 워커/PWA 설치는 HTTPS(secure context)에서만 동작**한다. 현재 컨테이너는 HTTP 이므로
+> `navigator.serviceWorker` 가 없다. 설치형/오프라인이 필요하면 TLS(리버스 프록시) 뒤에 두어야 한다.
