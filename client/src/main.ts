@@ -1,15 +1,14 @@
 /**
- * P0 뷰어 — 리플레이 파일 → 상태기계 → 2D 보드 미리보기.
- * 렌더러는 P1에서 WebGL2(2.5D)로 교체한다. 여기서는 **상태가 맞는지**를 눈으로 확인하는 것이 목적.
+ * P1 뷰어 — ICore(ReplayCore) + WebGL2 2.5D 보드 + 2D 텍스트 오버레이.
+ * P0의 상태기계를 그대로 쓰고, 렌더/코어 경계를 ICore 로 분리했다.
  */
-import { parseYrpx, type ReplayFile } from './engine/yrpx.ts';
-import { applyPacket, createState, type DuelState, PHASE_NAMES } from './engine/state.ts';
+import { parseYrpx, type ReplayPacket } from './engine/yrpx.ts';
+import { PHASE_NAMES, type DuelState } from './engine/state.ts';
+import { ReplayCore } from './core/ReplayCore.ts';
+import { BoardRenderer, type Quad } from './render/BoardRenderer.ts';
 
-/**
- * 브라우저 로딩 전략 (P0)
- *  - `.json` : tools/export.ts 로 만든 패킷 덤프 → LZMA 불필요
- *  - `.yrpX` : 로컬 LZMA 로 시도, 실패하면 안내(브라우저 LZMA 는 P1 — 서버 위임 예정)
- */
+const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+
 interface ReplayJson {
   file: string;
   names: string[];
@@ -24,157 +23,246 @@ function b64ToU8(s: string): Uint8Array {
   return out;
 }
 
-function fromJson(j: ReplayJson): ReplayFile {
+function fromJson(j: ReplayJson): { names: string[]; packets: ReplayPacket[] } {
   return {
-    version: 0,
-    flags: 0,
     names: j.names,
-    duelFlags: 0,
     packets: j.packets.map(([m, b]) => ({ message: m, data: b64ToU8(b) })),
-    turns: j.turns,
-    compressed: false,
-    trailing: 0,
-    fileBytes: 0,
-    bodyBytes: 0,
   };
 }
 
-const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+/* ---------- 레이아웃 ---------- */
+const C = {
+  card: 62,
+  cardH: 88,
+  gap: 8,
+  pad: 28,
+  rowGap: 10,
+};
 
-let replays: ReplayFile[] = [];
-let idx = 0;
-let cursor = 0;
-let state: DuelState = createState();
+let gl: BoardRenderer;
+let fx: CanvasRenderingContext2D;
+let core: ReplayCore | null = null;
+let state: DuelState | null = null;
+let names: string[] = [];
+let fileName = '';
 let timer: number | null = null;
+let speed = 20;
 
-const canvas = $<HTMLCanvasElement>('board');
-const ctx = canvas.getContext('2d')!;
+function boardSize(): { w: number; h: number } {
+  const host = $('stage');
+  const w = Math.max(360, host.clientWidth);
+  return { w, h: 560 };
+}
 
+function setup(): void {
+  const glCanvas = $<HTMLCanvasElement>('gl');
+  const fxCanvas = $<HTMLCanvasElement>('fx');
+  gl = new BoardRenderer(glCanvas);
+  fx = fxCanvas.getContext('2d')!;
+  resize();
+  window.addEventListener('resize', resize);
+  gl.draw([]);
+}
+
+function resize(): void {
+  const { w, h } = boardSize();
+  $('stage').style.height = h + 'px';
+  const glCanvas = $<HTMLCanvasElement>('gl');
+  const fxCanvas = $<HTMLCanvasElement>('fx');
+  gl.resize(w, h);
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  fxCanvas.width = Math.round(w * dpr);
+  fxCanvas.height = Math.round(h * dpr);
+  fxCanvas.style.width = w + 'px';
+  fxCanvas.style.height = h + 'px';
+  draw();
+}
+
+function zoneQuads(w: number, h: number): { quads: Quad[]; rects: Record<string, { x: number; y: number; w: number; h: number }> } {
+  const quads: Quad[] = [];
+  const rects: Record<string, { x: number; y: number; w: number; h: number }> = {};
+  const cw = C.card;
+  const ch = C.cardH;
+  const gap = C.gap;
+  const fieldW = cw * 5 + gap * 4;
+  const left = (w - fieldW) / 2;
+
+  // 존: 상대(위, depth 1) / 나(아래, depth 0)
+  const rows: Array<{ side: number; top: number; depth: number }> = [
+    { side: 1, top: C.pad + 44, depth: 1 },
+    { side: 0, top: h - C.pad - ch * 2 - gap - 20, depth: 0 },
+  ];
+
+  for (const r of rows) {
+    for (let i = 0; i < 5; i++) {
+      const x = left + i * (cw + gap);
+      const y = r.top;
+      const key = `m${r.side}-${i}`;
+      rects[key] = { x, y, w: cw, h: ch };
+      quads.push({ ...rects[key]!, depth: r.depth, color: [0.075, 0.125, 0.165] });
+      const sy = y + ch + 6;
+      const skey = `s${r.side}-${i}`;
+      rects[skey] = { x, y: sy, w: cw, h: ch };
+      quads.push({ ...rects[skey]!, depth: r.depth, color: [0.055, 0.09, 0.12] });
+    }
+  }
+  return { quads, rects };
+}
+
+function draw(): void {
+  if (!fx || !state) return;
+  const { w, h } = boardSize();
+  const { quads, rects } = zoneQuads(w, h);
+
+  // 카드가 있으면 색을 밝힌다
+  const paint = (key: string, filled: boolean, faceDown: boolean) => {
+    const r = rects[key];
+    if (!r) return;
+    const depth = key.startsWith('m1') || key.startsWith('s1') ? 1 : 0;
+    quads.push({
+      x: r.x,
+      y: r.y,
+      w: r.w,
+      h: r.h,
+      depth,
+      color: filled ? (faceDown ? [0.15, 0.22, 0.33] : [0.19, 0.31, 0.47]) : [0.045, 0.07, 0.09],
+    });
+  };
+  for (let side = 0; side <= 1; side++) {
+    for (let i = 0; i < 5; i++) {
+      const m = state.mzone[side][i];
+      const s = state.szone[side][i];
+      paint(`m${side}-${i}`, m !== null, false);
+      paint(`s${side}-${i}`, s !== null, true);
+    }
+  }
+  gl.draw(quads);
+
+  // 텍스트 오버레이
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  fx.save();
+  fx.scale(dpr, dpr);
+  fx.clearRect(0, 0, w, h);
+
+  fx.font = '600 13px system-ui, "Malgun Gothic", sans-serif';
+  fx.textBaseline = 'middle';
+
+  const head = (side: number, y: number, align: 'top' | 'bottom') => {
+    const label = side === 0 ? '나' : '상대';
+    const text = `${label}  ·  LP ${state!.lp[side]}   덱 ${state!.deck[side]}   엑스트라 ${state!.extra[side]}   패 ${state!.hand[side].length}   묘지 ${state!.grave[side].length}   제외 ${state!.banished[side].length}`;
+    fx.fillStyle = side === 0 ? 'rgba(220,235,255,0.92)' : 'rgba(200,215,235,0.78)';
+    fx.textAlign = 'left';
+    fx.fillText(text, C.pad, align === 'top' ? y : y);
+    if (side === 1 && names[1]) {
+      fx.fillStyle = 'rgba(140,160,190,0.8)';
+      fx.textAlign = 'right';
+      fx.fillText(names[1], w - C.pad, y);
+    }
+    if (side === 0 && names[0]) {
+      fx.fillStyle = 'rgba(140,160,190,0.8)';
+      fx.textAlign = 'right';
+      fx.fillText(names[0], w - C.pad, y);
+    }
+  };
+
+  head(1, C.pad + 18, 'top');
+  head(0, h - C.pad - C.cardH * 2 - C.gap - 40, 'bottom');
+
+  // 카드 코드
+  fx.font = '9px ui-monospace, Consolas, monospace';
+  fx.textAlign = 'center';
+  for (let side = 0; side <= 1; side++) {
+    for (let i = 0; i < 5; i++) {
+      const m = state.mzone[side][i];
+      if (m !== null) {
+        const r = rects[`m${side}-${i}`]!;
+        fx.fillStyle = 'rgba(210,230,255,0.95)';
+        fx.fillText(String(m).slice(-6), r.x + r.w / 2, r.y + r.h / 2);
+      }
+      const s = state.szone[side][i];
+      if (s !== null) {
+        const r = rects[`s${side}-${i}`]!;
+        fx.fillStyle = 'rgba(150,180,220,0.8)';
+        fx.fillText('SET', r.x + r.w / 2, r.y + r.h / 2);
+      }
+    }
+  }
+
+  // 중앙 상태
+  const phase = PHASE_NAMES[state.phase] ?? String(state.phase);
+  fx.font = '600 13px ui-monospace, Consolas, monospace';
+  fx.fillStyle = 'rgba(111,211,195,0.95)';
+  fx.fillText(`TURN ${state.turn} · ${phase}`, w / 2, h / 2 - 8);
+  if (state.chain.length) {
+    fx.font = '11px ui-monospace, Consolas, monospace';
+    fx.fillStyle = 'rgba(255,255,255,0.7)';
+    fx.fillText(state.chain.map((c) => c.code).join(' > '), w / 2, h / 2 + 12);
+  }
+  if (state.winner !== null) {
+    fx.font = '600 15px system-ui, sans-serif';
+    fx.fillStyle = 'rgba(255,220,140,0.95)';
+    fx.fillText(`WIN · P${state.winner + 1}`, w / 2, h / 2 + 38);
+  }
+  fx.restore();
+}
+
+/* ---------- UI ---------- */
 function setName(id: string, v: string): void {
   $(id).textContent = v;
 }
 
-function resetTo(n: number): void {
-  state = createState();
-  const rf = replays[idx];
-  if (!rf) return;
-  cursor = Math.max(0, Math.min(n, rf.packets.length));
-  for (let i = 0; i < cursor; i++) applyPacket(state, rf.packets[i]!);
-  render();
-}
-
 function renderSummary(): void {
-  const rf = replays[idx];
-  if (!rf) return;
-  setName('s-file', `${rf.packets.length}패킷 · ${(rf.fileBytes / 1024).toFixed(1)}KB · ${rf.compressed ? '압축' : '비압축'}`);
-  setName('s-names', rf.names.filter(Boolean).join('  vs  ') || '—');
-  setName('s-count', `${rf.packets.length.toLocaleString()} / ${rf.turns}턴`);
+  if (!core || !state) return;
+  setName('s-file', `${fileName || '—'} · ${core.length.toLocaleString()}패킷`);
+  setName('s-names', names.filter(Boolean).join('  vs  ') || '—');
+  setName('s-count', `${core.cursor.toLocaleString()} / ${core.length.toLocaleString()}`);
   setName('s-lp', `${state.lp[0]} / ${state.lp[1]}`);
   setName('s-win', state.winner === null ? '—' : `P${state.winner + 1} (reason ${state.winReason})`);
   setName('s-event', state.lastEvent || '—');
-}
-
-function card(x: number, y: number, w: number, h: number, code: number | null, faceDown = false): void {
-  ctx.fillStyle = code === null ? 'rgba(255,255,255,0.03)' : faceDown ? '#1f3a5a' : '#24405f';
-  ctx.strokeStyle = code === null ? 'rgba(255,255,255,0.10)' : 'rgba(160,200,255,0.55)';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.roundRect(x, y, w, h, 4);
-  ctx.fill();
-  ctx.stroke();
-  if (code !== null) {
-    ctx.fillStyle = '#cfe0ff';
-    ctx.font = '9px ui-monospace, Consolas, monospace';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(String(code).slice(-6), x + w / 2, y + h / 2);
-  }
-}
-
-function render(): void {
-  const W = canvas.width;
-  const H = canvas.height;
-  ctx.clearRect(0, 0, W, H);
-
-  // 존 배치: 상대(위) / 나(아래), 몬스터 5 + 마함 5 (+ 엑스트라 2, 필드 1 은 생략)
-  const cw = 62;
-  const ch = 88;
-  const gap = 8;
-  const left = (W - (cw * 5 + gap * 4)) / 2;
-
-  const drawSide = (ctrl: number, top: number) => {
-    for (let i = 0; i < 5; i++) {
-      card(left + i * (cw + gap), top, cw, ch, state.mzone[ctrl][i] ?? null);
-      card(left + i * (cw + gap), top + ch + gap, cw, ch, state.szone[ctrl][i] ?? null, true);
-    }
-    ctx.fillStyle = 'rgba(255,255,255,0.55)';
-    ctx.font = '11px system-ui';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-    ctx.fillText(
-      `${ctrl === 0 ? '나' : '상대'} · LP ${state.lp[ctrl]} · 덱 ${state.deck[ctrl]} · 엑스트라 ${state.extra[ctrl]} · 패 ${state.hand[ctrl].length} · 묘지 ${state.grave[ctrl].length}`,
-      left,
-      top - 18 < 0 ? top + ch * 2 + gap * 2 + 6 : top - 18,
-    );
-  };
-
-  drawSide(1, 46);
-  drawSide(0, H - ch * 2 - gap - 46);
-
-  // 체인 / 페이즈 표시
-  ctx.fillStyle = 'rgba(111,211,195,0.9)';
-  ctx.font = '12px ui-monospace, Consolas, monospace';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  const phase = PHASE_NAMES[state.phase] ?? String(state.phase);
-  ctx.fillText(`TURN ${state.turn} · ${phase} · CHAIN ${state.chain.length}`, W / 2, H / 2);
-  if (state.chain.length) {
-    ctx.fillStyle = 'rgba(255,255,255,0.75)';
-    ctx.font = '11px ui-monospace, Consolas, monospace';
-    ctx.fillText(state.chain.map((c) => c.code).join(' > '), W / 2, H / 2 + 20);
-  }
-
-  renderSummary();
   const seek = $<HTMLInputElement>('seek');
-  const rf = replays[idx];
-  seek.max = String(rf ? rf.packets.length : 0);
-  seek.value = String(cursor);
-  setName('pos', `${cursor} / ${rf ? rf.packets.length : 0}`);
+  seek.max = String(core.length);
+  seek.value = String(core.cursor);
 }
 
-async function files(list: FileList | null): Promise<void> {
-  if (!list || !list.length) return;
-  replays = [];
-  for (const f of Array.from(list)) {
-    try {
-      if (/\.json$/i.test(f.name)) {
-        replays.push(fromJson(JSON.parse(await f.text()) as ReplayJson));
-      } else {
-        replays.push(parseYrpx(new Uint8Array(await f.arrayBuffer())));
-      }
-    } catch (e) {
-      const msg = (e as Error).message;
-      setName(
-        'hint',
-        /lzma|undefined|apply/i.test(msg)
-          ? `${f.name}: 브라우저 압축 해제는 P1 — tools/export.ts 로 .json 을 만들어 여세요`
-          : `${f.name}: ${msg}`,
-      );
+async function load(files: FileList | null): Promise<void> {
+  if (!files?.length) return;
+  const f = files[0]!;
+  let packets: ReplayPacket[] = [];
+  let nm: string[] = [];
+  try {
+    if (/\.json$/i.test(f.name)) {
+      const j = JSON.parse(await f.text()) as ReplayJson;
+      const r = fromJson(j);
+      packets = r.packets;
+      nm = r.names;
+    } else {
+      const r = parseYrpx(new Uint8Array(await f.arrayBuffer()));
+      packets = r.packets;
+      nm = r.names;
     }
+  } catch (e) {
+    setName('hint', /해제기|LZMA/i.test((e as Error).message)
+      ? '압축 리플레이는 `npm run export -- "<파일>" out.json` 으로 변환해 여세요'
+      : `${f.name}: ${(e as Error).message}`);
+    return;
   }
-  if (!replays.length) return;
-  idx = 0;
-  setName('hint', `${replays.length}개 로드됨`);
-  resetTo(replays[0]!.packets.length);
+  core?.dispose();
+  core = new ReplayCore(packets);
+  names = nm;
+  fileName = f.name;
+  core.on('state', (s) => {
+    state = s;
+    draw();
+    renderSummary();
+  });
+  core.seek(0);
+  state = null;
+  core.seek(0);
+  setName('hint', `${packets.length.toLocaleString()}패킷 로드 · 재생/스텝 가능`);
 }
 
-$('load').addEventListener('click', () => files($<HTMLInputElement>('file').files));
-$<HTMLInputElement>('file').addEventListener('change', (e) => files((e.target as HTMLInputElement).files));
-$('seek').addEventListener('input', (e) => resetTo(Number((e.target as HTMLInputElement).value)));
-
-$('play').addEventListener('click', () => {
-  const rf = replays[idx];
-  if (!rf) return;
+function togglePlay(): void {
+  if (!core) return;
   if (timer !== null) {
     clearInterval(timer);
     timer = null;
@@ -182,21 +270,38 @@ $('play').addEventListener('click', () => {
     return;
   }
   $('play').textContent = '■ 정지';
-  if (cursor >= rf.packets.length) resetTo(0);
+  if (core.cursor >= core.length) core.seek(0);
   timer = window.setInterval(() => {
-    const r = replays[idx]!;
-    if (cursor >= r.packets.length) {
+    if (!core) return;
+    if (core.cursor >= core.length) {
       clearInterval(timer!);
       timer = null;
       $('play').textContent = '▶ 재생';
       return;
     }
-    // 한 번에 여러 패킷(대략 20/프레임) — 리플레이는 원본 타이밍이 없으므로 균등 재생
-    for (let i = 0; i < 20 && cursor < r.packets.length; i++, cursor++) applyPacket(state, r.packets[cursor]!);
-    render();
+    core.seek(core.cursor + speed);
   }, 50);
-});
+}
 
-// 첫 화면
-render();
-setName('hint', '리플레이를 선택하세요 (.yrpX)');
+function boot(): void {
+  setup();
+  setName('hint', '리플레이(.json) 를 선택하세요');
+
+  $('load').addEventListener('click', () => load($<HTMLInputElement>('file').files));
+  $<HTMLInputElement>('file').addEventListener('change', (e) => load((e.target as HTMLInputElement).files));
+  $('play').addEventListener('click', togglePlay);
+  $('step').addEventListener('click', () => core?.step());
+  $('back').addEventListener('click', () => core?.seek((core?.cursor ?? 0) - 1));
+  $('seek').addEventListener('input', (e) => core?.seek(Number((e.target as HTMLInputElement).value)));
+  $<HTMLInputElement>('speed').addEventListener('input', (e) => {
+    speed = Number((e.target as HTMLInputElement).value);
+    setName('speedv', String(speed));
+  });
+
+  // PWA
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  }
+}
+
+boot();

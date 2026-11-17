@@ -1,0 +1,14 @@
+{
+  "name": "EDOPro Web",
+  "short_name": "EDOPro",
+  "description": "EDOPro Web — 커스텀 클라이언트 (DESIGN-V2)",
+  "start_url": "/",
+  "scope": "/",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#0b0d10",
+  "theme_color": "#0b0d10",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
