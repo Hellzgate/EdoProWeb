@@ -55,6 +55,21 @@ HUD 텍스트만 우리 토큰(`render/theme.ts`)을 쓴다.
 
 ---
 
+### 2.1 `OCG_DuelQuery` 조사 기록 (2026-11-17, v0.9.18)
+- 구현: `wasm/webapi.cpp` 의 `web_query_card(duel, ctrl, loc, seq, out)` — ATTACK / DEFENSE / OVERLAY 를 **한 번에 한 플래그씩** 질의
+- 실측 (`tools/query-test.mjs`, Node):
+  ```
+  내 덱 0     atk 0  def 0  overlay 1
+  내 패 0     atk 0  def 0  overlay 1
+  내 몬스터 0 atk 0  def 0  overlay 0
+  상대 덱 0   atk 0  def 0  overlay 1
+  ```
+- 결론: 응답 버퍼 레이아웃이 우리 가정(`[u32 flags][값…]`)과 **다르다**. 다음 세션 과제:
+  1. `web_query_raw` 로 버퍼 hex 덤프 → 실제 레이아웃 확정
+  2. `OCG_DuelQueryLocation` / `OCG_DuelQueryCount` 대체 검토
+  3. 원본 `gframe/client_field.cpp` 의 QueryCard 파싱과 대조
+- 그때까지 잘못된 값 노출 방지: atk·def 가 모두 0 이면 배지를 그리지 않는다 (`render/board.ts`).
+
 ## 3. 게임 흐름 (Interaction)
 
 | 기능 | 원본 | 우리 | 상태 |
