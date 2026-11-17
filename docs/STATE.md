@@ -7,7 +7,8 @@
 
 **P2 완료 + 원본 EDOPro 자산 적용** — 브라우저에서 실제 듀얼이 끝까지 돌고, 필드는 **원본 `field3.png` 매트 + 실제 카드 이미지(18,962장)** 로 그린다.
 실측: `TURN 15 · WIN P1 · LP 8000/0 · 패킷 894 · RETRY 0`
-**다음 = P3(온라인 RemoteCore)** 또는 선택 UI 정교화.
+최신 v0.9.8: 카드 표시형식(수비 회전/세트 뒷면) · 카드 호버 확대(미검증) · 렌더 모듈화.
+**다음 = P3(온라인 RemoteCore)** 또는 나머지 격차(EDOPRO-COMPARISON.md §5).
 
 ### 1.1 최근 추가 (v0.9.5)
 - 필드: `field3.png` 매트 + `bg.png` 배경 + 좌표는 `gframe/materials.cpp` 실측값 (→ `docs/YGO-FIELD-LAYOUT.md` §7)

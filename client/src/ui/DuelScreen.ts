@@ -61,6 +61,7 @@ export class DuelScreen {
   private prompt: Prompt | null = null;
   private sel = new Set<number>();
   private sortOrder: number[] = [];
+  private layout: ReturnType<typeof layoutField> | null = null;
   private auto = false;
   private started = false;
   private busy = false;
@@ -84,6 +85,7 @@ export class DuelScreen {
           <div id="d-stage">
             <canvas id="d-gl"></canvas>
             <canvas id="d-fx"></canvas>
+            <img id="d-zoom" alt="" />
           </div>
           <div class="panel" id="d-status" style="margin-top:12px"></div>
         </div>
@@ -96,6 +98,52 @@ export class DuelScreen {
     this.setupCanvas();
     onAssetLoad(() => this.render());
     requestAnimationFrame(() => this.resize());
+    const stage = this.root.querySelector('#d-stage') as HTMLElement;
+    stage.addEventListener('mousemove', (e) => this.hover(e));
+    stage.addEventListener('mouseleave', () => this.showZoom(0));
+  }
+
+  /* ---------------- 카드 확대(호버) ---------------- */
+  private hover(e: MouseEvent): void {
+    if (!this.layout || !this.state) return;
+    const stage = this.root.querySelector('#d-stage') as HTMLElement;
+    const rect = stage.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    for (let side = 0; side <= 1; side++) {
+      for (let i = 0; i < 7; i++) {
+        const r = this.layout.zones[`m${side}-${i}`];
+        if (!r || x < r.x || x > r.x + r.w || y < r.y || y > r.y + r.h) continue;
+        const code = this.state.mzone[side][i];
+        if (code !== null) return this.showZoom(code, e);
+      }
+      for (let i = 0; i < 6; i++) {
+        const r = this.layout.zones[`s${side}-${i}`];
+        if (!r || x < r.x || x > r.x + r.w || y < r.y || y > r.y + r.h) continue;
+        const code = this.state.szone[side][i];
+        if (code !== null) return this.showZoom(code, e);
+      }
+    }
+    this.showZoom(0);
+  }
+
+  /** code=0 이면 숨김. 마우스 반대편에 띄운다. */
+  private showZoom(code: number, e?: MouseEvent): void {
+    const img = this.root.querySelector('#d-zoom') as HTMLImageElement;
+    if (!img) return;
+    if (!code) {
+      img.classList.remove('on');
+      return;
+    }
+    img.src = `/data/pics/${code}.jpg`;
+    img.classList.add('on');
+    const stage = this.root.querySelector('#d-stage') as HTMLElement;
+    const rect = stage.getBoundingClientRect();
+    const x = (e?.clientX ?? rect.left + rect.width / 2) - rect.left;
+    const left = x > rect.width / 2;
+    img.style.left = left ? '12px' : `${Math.max(12, rect.width - 208)}px`;
+    img.style.top = '50%';
+    img.style.transform = 'translateY(-50%)';
   }
 
   private $<T extends HTMLElement = HTMLElement>(id: string): T {

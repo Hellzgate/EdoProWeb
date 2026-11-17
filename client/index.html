@@ -116,6 +116,13 @@
         background: #05070a url('/theme/bg.png') center/cover no-repeat; border: 1px solid var(--line);
       }
       #d-gl, #d-fx { position: absolute; left: 0; top: 0; display: block; }
+      #d-zoom {
+        position: absolute; width: 196px; max-height: 78%; object-fit: contain;
+        border-radius: 8px; border: 1px solid rgba(232,200,122,0.5);
+        box-shadow: 0 8px 28px rgba(0,0,0,0.6); pointer-events: none;
+        opacity: 0; transition: opacity 90ms ease; background: #0a0b0d;
+      }
+      #d-zoom.on { opacity: 1; }
 
       .duel-side { display: flex; flex-direction: column; gap: 12px; }
       .d-prompt { display: flex; flex-wrap: wrap; gap: 6px; }
