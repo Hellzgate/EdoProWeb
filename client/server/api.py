@@ -20,7 +20,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 DATA = os.environ.get("DATA_DIR", "/data")
 SCRIPT = os.environ.get("REFRESH_SH", "/app/tools/refresh.sh")
 TOKEN = os.environ.get("REFRESH_TOKEN", "")
-COOLDOWN = int(os.environ.get("REFRESH_COOLDOWN_SEC", "300"))
+COOLDOWN = int(os.environ.get("REFRESH_COOLDOWN_SEC", "30"))
 PORT = int(os.environ.get("API_PORT", "8081"))
 
 _lock = threading.Lock()
@@ -97,13 +97,12 @@ class H(BaseHTTPRequestHandler):
         if not self.path.startswith("/api/data/refresh"):
             self._json(404, {"error": "not found"})
             return
-        if not TOKEN:
-            self._json(403, {"error": "refresh disabled (REFRESH_TOKEN 미설정)"})
-            return
-        given = (self.headers.get("X-Token") or "").strip()
-        if given != TOKEN:
-            self._json(401, {"error": "unauthorized"})
-            return
+        # 토큰은 **선택**. 비어 있으면 누구나 누를 수 있고, 대신 30초 쿨다운으로 보호한다.
+        if TOKEN:
+            given = (self.headers.get("X-Token") or "").strip()
+            if given != TOKEN:
+                self._json(401, {"error": "unauthorized"})
+                return
         if _state["state"] == "running":
             self._json(409, {"error": "already running"})
             return

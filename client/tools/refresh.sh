@@ -1,21 +1,16 @@
 #!/usr/bin/env bash
-# 데이터 레포 정기 갱신 (미니PC/NAS 용)
+# 데이터 레포 정기 갱신 (미니PC/NAS/컨테이너 용)
 #
 #   bash tools/refresh.sh [출력폴더]
 #
-# 하는 일
-#   1) repos.json 의 레포들을 git fetch/reset (shallow)
-#   2) cdb 병합 → cards.json, script/lflists/puzzles 복사, data-meta.json
-#   3) **원자적 교체** (tmp 에 만들고 mv) — 갱신 중에도 클라이언트가 깨지지 않는다
-#
-# 컨테이너는 이 폴더를 읽기 전용으로 마운트한다:
-#   docker run ... -v ~/edopro-data:/usr/share/nginx/html/data:ro
+# ⚠ 출력폴더가 **바인드 마운트 지점**이면 폴더 자체를 rename 할 수 없다(mv: Resource busy).
+#    → 같은 볼륨 안의 하위 폴더($OUT/.tmp)에 만들고 **항목별로 교체**한다.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(dirname "$HERE")"
 OUT="${1:-$HOME/edopro-data}"
-TMP="${OUT}.tmp"
+TMP="$OUT/.tmp"
 LOG="${OUT}.log"
 
 PY=$(command -v python3 || command -v python)
@@ -33,17 +28,23 @@ if ! "$PY" "$HERE/sync-data.py" --out "$TMP" >>"$LOG" 2>&1; then
   exit 1
 fi
 
-# 교체: 이전 것을 .old 로 밀고 새 것을 올린다(짧은 순간만 비어 있음)
-if [ -d "$OUT" ]; then mv "$OUT" "$OUT.old"; fi
-mv "$TMP" "$OUT"
-rm -rf "$OUT.old"
+# 항목별 교체 (마운트 루트는 건드리지 않는다)
+for item in cards.json data-meta.json servers.json urls.json script lflists puzzles; do
+  [ -e "$TMP/$item" ] || continue
+  rm -rf "$OUT/$item.old"
+  [ -e "$OUT/$item" ] && mv "$OUT/$item" "$OUT/$item.old"
+  mv "$TMP/$item" "$OUT/$item"
+  rm -rf "$OUT/$item.old"
+done
+rm -rf "$TMP"
 
 COUNT=$("$PY" - "$OUT/data-meta.json" <<'PY'
 import json,sys
 try:
     m=json.load(open(sys.argv[1],encoding='utf-8'))
     c=m.get("counts",{})
-    print("cards=%s script=%s lflist=%s puzzle=%s" % (c.get("cards"),c.get("script"),c.get("lflist"),c.get("puzzle")))
+    print("cards=%s ko=%s en=%s script=%s lflist=%s puzzle=%s" % (
+        c.get("cards"), c.get("ko"), c.get("en"), c.get("script"), c.get("lflist"), c.get("puzzle")))
 except Exception as e:
     print("meta error:", e)
 PY
