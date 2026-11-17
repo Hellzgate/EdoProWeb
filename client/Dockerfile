@@ -1,12 +1,21 @@
-# EDOPro Web 클라이언트 — 정적 서빙 이미지
-# 빌드는 호스트에서 `npm run build` 로 끝낸 뒤 dist 만 담는다(이미지 최소화·빌드 재현성).
+# EDOPro Web 클라이언트 — 정적 + 데이터 갱신 API
+# 데이터(cards.json·script/…)는 **이미지에 넣지 않고 볼륨**으로 마운트한다(/data).
 FROM nginx:alpine
 
 LABEL org.opencontainers.image.title="edopro-client" \
-      org.opencontainers.image.description="EDOPro Web — new client (DESIGN-V2 P0/P1)" \
-      org.opencontainers.image.version="0.1.0"
+      org.opencontainers.image.description="EDOPro Web — new client (DESIGN-V2)" \
+      org.opencontainers.image.version="0.4.0"
+
+# 갱신 API + 스크립트 실행용 (git/python/bash)
+RUN apk add --no-cache python3 bash git coreutils
 
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY dist/ /usr/share/nginx/html/
+COPY server/api.py /app/api.py
+COPY tools/sync-data.py tools/refresh.sh /app/tools/
+COPY repos.json /app/repos.json
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh /app/tools/refresh.sh && mkdir -p /data
 
 EXPOSE 80
+ENTRYPOINT ["/entrypoint.sh"]

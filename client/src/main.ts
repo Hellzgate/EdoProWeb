@@ -8,6 +8,7 @@ import { ReplayCore } from './core/ReplayCore.ts';
 import { BoardRenderer } from './render/BoardRenderer.ts';
 import { layoutField, paintState } from './render/field.ts';
 import { DeckEditor } from './ui/DeckEditor.ts';
+import { DataPanel } from './ui/DataPanel.ts';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -234,13 +235,16 @@ function boot(): void {
   setName('hint', '리플레이(.json) 를 선택하세요');
 
   let deck: DeckEditor | null = null;
+  let data: DataPanel | null = null;
   document.querySelectorAll<HTMLButtonElement>('nav .tab').forEach((btn) => {
     btn.addEventListener('click', () => {
       const tab = btn.dataset.tab!;
       document.querySelectorAll('nav .tab').forEach((b) => b.classList.toggle('active', b === btn));
       $('tab-replay').classList.toggle('hidden', tab !== 'replay');
       $('tab-deck').classList.toggle('hidden', tab !== 'deck');
+      $('tab-data').classList.toggle('hidden', tab !== 'data');
       if (tab === 'deck' && !deck) deck = new DeckEditor($('deck-root'));
+      if (tab === 'data' && !data) data = new DataPanel($('data-root'));
     });
   });
 
