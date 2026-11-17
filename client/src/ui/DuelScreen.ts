@@ -288,7 +288,7 @@ export class DuelScreen {
       // 이미 떠 있는 프롬프트도 자동으로 처리 (토글 시점)
       if (this.auto && this.prompt) {
         const p = this.prompt;
-        window.setTimeout(() => this.respond(autoChoice(p)), 50);
+        window.setTimeout(() => this.respond(autoChoice(p, this.autoCtx())), 50);
       }
     });
     this.$('d-stop').addEventListener('click', () => this.stop());
@@ -440,6 +440,15 @@ export class DuelScreen {
     core.on('error', (e) => this.pushLog(`오류: ${e.message}`));
   }
 
+  /** 자동 정책용 컨텍스트(공격력 조회 + 상대 최고 공격력) */
+  private autoCtx(): { atk: (c: number) => number; enemyAtk: number } {
+    const atk = (code: number) => this.cards.get(code)?.atk ?? 0;
+    let enemyAtk = 0;
+    const st = this.state;
+    if (st) for (const c of st.mzone[1]) if (c !== null) enemyAtk = Math.max(enemyAtk, atk(c));
+    return { atk, enemyAtk };
+  }
+
   /** 상태 이벤트 → 원본 SE */
   private soundFor(ev: string): void {
     if (!ev) return;
@@ -518,7 +527,7 @@ export class DuelScreen {
       this.busy = true;
       window.setTimeout(() => {
         this.busy = false;
-        this.respond(autoChoice(p));
+        this.respond(autoChoice(p, this.autoCtx()));
       }, p.player === 1 ? 180 : 60);
     }
   }

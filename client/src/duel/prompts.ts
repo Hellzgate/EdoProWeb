@@ -401,15 +401,30 @@ export const encodeCode = (code: number): Uint8Array => i32(code);
 export const encodePosition = (pos: number): Uint8Array => i32(pos);
 
 /* ---------------- 자동 선택 (상대/AI/테스트) ---------------- */
+export interface AutoContext {
+  /** 카드 코드 → 현재 공격력(카드DB/조회값) */
+  atk: (code: number) => number;
+  /** 상대 필드의 최고 공격력(앞면) */
+  enemyAtk: number;
+}
+
 /**
- * 가능한 첫 수를 고른다. 완벽한 AI 가 아니라 **듀얼이 막히지 않게** 하는 최소 정책이다.
- * 우선순위(내 턴): 발동 → 일반소환 → 세트 → (전투 가능하면) BP → EP
+ * 가능한 첫 수를 고른다. 완벽한 AI 가 아니라 **듀얼이 막히지 않게** 하는 정책.
+ *  - 메인: 발동 → 일반소환 → 세트 → BP → EP
+ *  - 배틀: 직접 공격이 가능하면 최고 공격력으로, 아니면 이길 수 있을 때만 공격
  */
-export function autoChoice(p: Prompt): Uint8Array {
+export function autoChoice(p: Prompt, ctx?: AutoContext): Uint8Array {
   switch (p.kind) {
     case 'idle': {
       if (p.activate.length) return encodeIdle(5, 0);
-      if (p.summon.length) return encodeIdle(0, 0);
+      if (p.summon.length) {
+        // 가장 강한 몬스터부터
+        let best = 0;
+        if (ctx) for (let i = 1; i < p.summon.length; i++) {
+          if (ctx.atk(p.summon[i]!.code) > ctx.atk(p.summon[best]!.code)) best = i;
+        }
+        return encodeIdle(0, best);
+      }
       if (p.spsummon.length) return encodeIdle(1, 0);
       if (p.mset.length) return encodeIdle(3, 0);
       if (p.sset.length) return encodeIdle(4, 0);
@@ -420,8 +435,23 @@ export function autoChoice(p: Prompt): Uint8Array {
     case 'battle': {
       if (p.activate.length) return encodeBattle(0, 0);
       if (p.attack.length) {
-        const i = p.direct.findIndex(Boolean);
-        return encodeBattle(1, i >= 0 ? i : 0);
+        const directIdx = p.direct.findIndex(Boolean);
+        if (directIdx >= 0) return encodeBattle(1, directIdx);
+        if (ctx) {
+          // 이길 수 있는(공격력이 더 높은) 몬스터로만 공격
+          let best = -1;
+          let bestAtk = -1;
+          p.attack.forEach((c, i) => {
+            const a = ctx.atk(c.code);
+            if (a >= ctx.enemyAtk && a > bestAtk) {
+              best = i;
+              bestAtk = a;
+            }
+          });
+          if (best >= 0) return encodeBattle(1, best);
+        } else {
+          return encodeBattle(1, 0);
+        }
       }
       if (p.toM2) return encodeBattle(2, 0);
       return encodeBattle(3, 0);

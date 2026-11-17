@@ -126,7 +126,8 @@ while (steps < MAX_STEPS) {
     break;
   }
 
-  core.respond(autoChoice(p));
+  const enemyAtk = Math.max(0, ...core.snapshot.mzone[1].filter((c) => c !== null).map((c) => CARDS.get(c)?.atk ?? 0));
+  core.respond(autoChoice(p, { atk: (c) => CARDS.get(c)?.atk ?? 0, enemyAtk }));
   steps++;
   if (core.retries > lastRetries) {
     retryLog.push(`raw=${Buffer.from(req.payload).toString('hex')} p${p.player} ${p.kind} ${p.disfield === undefined ? '' : p.disfield ? 'DIS':'PLACE'} flag=0x${(p.flag ?? 0).toString(16)} count=${p.count} → ${Buffer.from(autoChoice(p)).toString('hex')}`);
