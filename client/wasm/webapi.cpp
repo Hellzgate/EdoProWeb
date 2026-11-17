@@ -1,6 +1,7 @@
 /*
- * webapi.cpp — ocgcore 의 C++ 구조체/콜백을 JS 에서 쓰기 쉽게 감싸는 얇은 C 심.
- * JS 는 이 심만 호출한다(구조체 오프셋 계산 금지 — 컴파일러가 하게 둔다).
+ * webapi.cpp — ocgcore 를 JS 에서 쉽게 쓰기 위한 얇은 C 심.
+ * (ocgapi.h 실측: OCG_CreateDuel(OCG_Duel*, const OCG_DuelOptions*),
+ *  OCG_DuelSetResponse(OCG_Duel, const void*, uint32_t), OCG_DestroyDuel(OCG_Duel))
  */
 #include "ocgapi.h"
 #include <cstring>
@@ -9,7 +10,6 @@ static OCG_DuelOptions g_opts;
 
 extern "C" {
 
-/* 카드/스크립트/로그 콜백은 JS addFunction 이 돌려준 **테이블 인덱스**를 그대로 받는다. */
 int web_create_duel(unsigned int s0, unsigned int s1, unsigned int s2, unsigned int s3,
                     unsigned long long flags,
                     int cardReader, int scriptReader, int logHandler, int readerDone,
@@ -28,10 +28,10 @@ int web_create_duel(unsigned int s0, unsigned int s1, unsigned int s2, unsigned 
     g_opts.enableUnsafeLibraries = static_cast<uint8_t>(unsafeLibs);
 
     OCG_Duel duel = nullptr;
-    int rc = OCG_CreateDuel(&duel, g_opts);
+    int rc = OCG_CreateDuel(&duel, &g_opts);
     if (rc != 0)
         return -rc;
-    return reinterpret_cast<int>(duel);
+    return static_cast<int>(reinterpret_cast<long>(duel));
 }
 
 int web_start_duel(OCG_Duel duel) { return duel ? OCG_StartDuel(duel) : -1; }
@@ -40,15 +40,20 @@ int web_get_message(OCG_Duel duel, unsigned char* buf, int len)
 {
     return duel ? OCG_DuelGetMessage(duel, buf, static_cast<uint32_t>(len)) : -1;
 }
-int web_set_responsei(OCG_Duel duel, int idx, int value)
+int web_set_response_int(OCG_Duel duel, int value)
 {
     if (!duel) return -1;
-    OCG_DuelSetResponse resp{};
-    resp.index = static_cast<uint32_t>(idx);
-    resp.value = value;
-    return OCG_DuelSetResponse(duel, &resp, sizeof(resp));
+    unsigned char buf[4];
+    std::memcpy(buf, &value, 4);
+    OCG_DuelSetResponse(duel, buf, 4);
+    return 0;
+}
+int web_set_response_buf(OCG_Duel duel, const void* buf, int len)
+{
+    if (!duel) return -1;
+    OCG_DuelSetResponse(duel, buf, static_cast<uint32_t>(len));
+    return 0;
 }
 void web_destroy_duel(OCG_Duel duel) { if (duel) OCG_DestroyDuel(duel); }
-int web_loader_version(int* major, int* minor) { return 0; }
 
 } /* extern "C" */
