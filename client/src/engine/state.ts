@@ -68,6 +68,8 @@ export interface DuelState {
   mpos: Array<Array<number | null>>;
   /** 마함 존 표시형식 */
   spos: Array<Array<number | null>>;
+  /** 존별 카운터 수(m0-1, s0-0 키) */
+  counters: Record<string, number>;
   chain: StackCard[];
   winner: number | null;
   winReason: number | null;
@@ -93,6 +95,7 @@ export function createState(): DuelState {
     phase: 0,
     mpos: [empty(7), empty(7)],
     spos: [empty(6), empty(6)],
+    counters: {},
     chain: [],
     winner: null,
     winReason: null,
@@ -243,6 +246,45 @@ export function applyPacket(s: DuelState, p: ReplayPacket): void {
         if (seq < s.szone[ctrl].length) s.szone[ctrl][seq] = code;
       }
       s.lastEvent = (p.message === MSG.SUMMONING ? 'SUMMON ' : 'SPSUMMON ') + code;
+      break;
+    }
+    case MSG.POS_CHANGE: {
+      // 운영: u32 code · u8 ctrl · u8 loc · u8 seq · u8 prevPos · u8 pos
+      const code = readU32(d, 0);
+      const ctrl = readU8(d, 4) & 1;
+      const loc = readU8(d, 5);
+      const seq = readU8(d, 6);
+      const pos = readU8(d, 8);
+      if (loc & LOC.MZONE && seq < 7) s.mpos[ctrl]![seq] = pos;
+      if (loc & LOC.SZONE && seq < 6) s.spos[ctrl]![seq] = pos;
+      s.lastEvent = 'POS ' + code + ' → ' + pos;
+      break;
+    }
+    case MSG.FLIPSUMMONING: {
+      const code = readU32(d, 0);
+      const ctrl = readU8(d, 4) & 1;
+      const loc = readU8(d, 5);
+      const seq = readU32(d, 6);
+      if (loc & LOC.MZONE && seq < 7) {
+        s.mzone[ctrl][seq] = code;
+        s.mpos[ctrl]![seq] = 0x1; // 앞면 공격
+      }
+      s.lastEvent = 'FLIP ' + code;
+      break;
+    }
+    case MSG.ADD_COUNTER:
+    case MSG.REMOVE_COUNTER: {
+      // u16 type · u8 ctrl · u8 loc · u8 seq · u16 count
+      readU16(d, 0);
+      const ctrl = readU8(d, 2) & 1;
+      const loc = readU8(d, 3);
+      const seq = readU8(d, 4);
+      const n = readU16(d, 5);
+      const key = loc & LOC.MZONE ? `m${ctrl}-${seq}` : `s${ctrl}-${seq}`;
+      const add = p.message === MSG.ADD_COUNTER;
+      s.counters[key] = Math.max(0, (s.counters[key] ?? 0) + (add ? n : -n));
+      if (!s.counters[key]) delete s.counters[key];
+      s.lastEvent = (add ? 'COUNTER +' : 'COUNTER -') + n;
       break;
     }
     case MSG.LPUPDATE: {

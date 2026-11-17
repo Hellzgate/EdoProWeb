@@ -17,6 +17,7 @@ import { ScriptCache } from '../data/scripts.ts';
 import {
   autoChoice,
   decodePrompt,
+  freeZones,
   encodeAck,
   encodeAttrib,
   encodeBattle,
@@ -36,6 +37,42 @@ import {
 
 const LOC_M = 0x04;
 const LOC_S = 0x08;
+
+/** 프롬프트가 가리키는 존 키 목록(강조 표시용) */
+function promptZones(p: Prompt): string[] {
+  const out: string[] = [];
+  const add = (e: { ctrl: number; loc: number; seq: number }) => {
+    if (e.loc & LOC_M) out.push(`m${e.ctrl & 1}-${e.seq}`);
+    else if (e.loc & LOC_S) out.push(`s${e.ctrl & 1}-${e.seq}`);
+  };
+  switch (p.kind) {
+    case 'card':
+    case 'tribute':
+      p.cards.forEach(add);
+      break;
+    case 'sum':
+      p.must.forEach(add);
+      p.cards.forEach(add);
+      break;
+    case 'unselect':
+      p.select.forEach(add);
+      p.unselect.forEach(add);
+      break;
+    case 'chain':
+      p.chains.forEach(add);
+      break;
+    case 'effectyn':
+      add(p.card);
+      break;
+    case 'place':
+      // 배치 프롬프트는 **가능한 모든 존**을 강조한다(1개만 고르는 UI 라도 후보는 전부)
+      for (const z of freeZones(p.flag, 99, p.player)) {
+        out.push(`${z.loc & LOC_M ? 'm' : 's'}${z.ctrl}-${z.seq}`);
+      }
+      break;
+  }
+  return out;
+}
 
 /** 종족/속성 이름 (ocgapi_constants.h 비트) */
 const RACE_NAMES: Record<number, string> = {
@@ -62,6 +99,7 @@ export class DuelScreen {
   private sel = new Set<number>();
   private sortOrder: number[] = [];
   private layout: ReturnType<typeof layoutField> | null = null;
+  private highlight: string[] = [];
   private auto = false;
   private started = false;
   private busy = false;
@@ -311,6 +349,7 @@ export class DuelScreen {
     const p = decodePrompt(type, payload);
     if (!p) return;
     this.prompt = p;
+    this.highlight = promptZones(p);
     this.sel.clear();
     this.sortOrder = [];
     this.pushLog(`${p.kind}${'player' in p ? ` (P${p.player + 1})` : ''}`);
@@ -336,6 +375,7 @@ export class DuelScreen {
     //    먼저 현재 프롬프트를 비우고 나서 응답해야 새 프롬프트가 지워지지 않는다.
     this.prompt = null;
     this.sel.clear();
+    this.highlight = [];
     this.renderPrompt();
     core.respond(bytes);
     this.render();
@@ -598,13 +638,14 @@ export class DuelScreen {
     const w = Math.max(360, stage.clientWidth);
     const h = Number(stage.style.height.replace('px', '')) || 420;
     const layout = layoutField(w, h);
+    this.layout = layout;
     this.gl?.draw([]);
 
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     const fx = this.fx;
     fx.save();
     fx.scale(dpr, dpr);
-    drawBoard(fx, w, h, layout, this.state, { names: ['나', '상대'] });
+    drawBoard(fx, w, h, layout, this.state, { names: ['나', '상대'], highlight: this.highlight });
     fx.restore();
 
     this.renderStatus();

@@ -19,6 +19,8 @@ import { INK, roundRect } from './theme.ts';
 export interface BoardLabels {
   /** [나, 상대] */
   names?: string[];
+  /** 강조할 존 키(`m0-1`, `s1-0` …) — 선택 대상 */
+  highlight?: string[];
 }
 
 export function drawBoard(
@@ -72,6 +74,16 @@ export function drawBoard(
   pile('ban-0', null, s.banished[0]!.length);
   pile('ban-1', null, s.banished[1]!.length);
 
+  /* 2.5) 선택 대상 강조 */
+  for (const key of labels.highlight ?? []) {
+    const r = layout.zones[key];
+    if (!r) continue;
+    roundRect(ctx, { x: r.x - 2, y: r.y - 2, w: r.w + 4, h: r.h + 4 }, 6);
+    ctx.strokeStyle = 'rgba(232,200,122,0.95)';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+  }
+
   /* 3) 필드 카드 */
   for (let side = 0; side <= 1; side++) {
     for (let i = 0; i < 7; i++) {
@@ -87,6 +99,22 @@ export function drawBoard(
       const r = layout.zones[`s${side}-${i}`];
       if (r) drawCard(ctx, r, code, side === 0, deckImg, s.spos[side]?.[i] ?? 0);
     }
+  }
+
+  /* 3.5) 카운터 배지 */
+  for (const key of Object.keys(s.counters ?? {})) {
+    const n = s.counters[key]!;
+    if (!n) continue;
+    const r = layout.zones[key];
+    if (!r) continue;
+    const bw = Math.max(14, r.w * 0.32);
+    roundRect(ctx, { x: r.x + r.w - bw - 1, y: r.y + 1, w: bw, h: bw }, 3);
+    ctx.fillStyle = 'rgba(232,200,122,0.92)';
+    ctx.fill();
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#1a1408';
+    ctx.font = `700 ${Math.max(8, Math.round(bw * 0.68))}px ui-monospace, Consolas, monospace`;
+    ctx.fillText(String(n), r.x + r.w - bw / 2 - 1, r.y + 1 + bw / 2);
   }
 
   /* 4) 손패 */
