@@ -57,13 +57,14 @@ node tools/duel-test.mjs            # 실제 카드 22,654 + 스크립트 4,973
 
 ## 4. 다음 작업
 
-### P2-b `src/core/LocalCore.ts` (ICore 구현)
-- 계약: `src/core/ICore.ts` (`mode/length/cursor/on/seek/step/respond/dispose`)
-- 상태기계 재사용: `src/engine/state.ts` 의 `applyPacket(s, {message, data})` — `data` 는 **type 바이트 제외** payload
-- 흐름: `create` → 시스템 스크립트 21개 로드 → `web_new_card`×덱 → `start` →
-  `process → get_message(배치) → 패킷 분해 → applyPacket → (AWAITING 이면) need 이벤트 → respond`
-- 브라우저에서는 `public/wasm/ocgcore.js` 를 `import(/* @vite-ignore */ '/wasm/ocgcore.js')` 로 로드
-- 카드/스크립트 소스: `/data/cards.json`, `/data/script/<repo>/*.lua` (fetch 1회 + Map 캐시)
+### P2-b `src/core/LocalCore.ts` (ICore 구현) — **작성 완료(타입 검사 통과), UI 배선만 남음**
+- `src/core/ocgcore.ts` : C 심 바인딩(`OcgDuel.create/addCard/preloadScript/start/step/respondInt/respond/destroy`)
+- `src/core/LocalCore.ts` : `ICore` 구현 — 덱 배치 → `SYSTEM_SCRIPTS` 21개 선행 로드 → start → pump
+  - 메시지 배치는 `applyPacket`(P0 상태기계)로 그대로 흘려 ReplayCore 와 동일 상태
+  - 응답 필요 메시지는 `need` 이벤트(`kind` = `MSG_NAME`) · `pendingRequest` getter
+  - `seek()` 는 라이브라 no-op, `step()` = pump 1회
+- **남은 것**: ①브라우저 소스 연결(`/data/cards.json` + `/data/script/<repo>/*.lua`, `script/index.json` 인덱스 필요)
+  ②선택 UI(응답 정책) ③`setcodes` 수집
 
 ### P2-c 남은 정확도
 - **`setcodes` 미수집**: `cards.json` 에 setcode 가 없어 `IsSetCard` 계열이 전부 실패한다 → `tools/cards.py` 로 cdb `datas.setcode` 를 **추가 수집**(최대 4개, 0 종료) 후 cardReader 에서 채울 것
