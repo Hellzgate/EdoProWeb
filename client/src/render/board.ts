@@ -10,6 +10,7 @@
  * 배경(bg.png)은 CSS 가 담당한다(캔버스는 투명).
  */
 import type { DuelState } from '../engine/state.ts';
+import { cardById } from '../data/carddb.ts';
 import { deckBack, extraBack, fieldImage } from './assets.ts';
 import { drawCard, drawHand } from './cards.ts';
 import type { FieldLayout } from './field.ts';
@@ -129,6 +130,27 @@ export function drawBoard(
     ctx.fillStyle = '#1a1408';
     ctx.font = `700 ${Math.max(8, Math.round(bw * 0.68))}px ui-monospace, Consolas, monospace`;
     ctx.fillText(String(n), r.x + r.w - bw / 2 - 1, r.y + 1 + bw / 2);
+  }
+
+  /* 3.6) 펜듈럼 스케일 (마함 0/4번 = 펜듈럼 존) */
+  for (let side = 0; side <= 1; side++) {
+    for (const i of [0, 4]) {
+      const code = s.szone[side][i];
+      if (code === null) continue;
+      const c = cardById(code);
+      if (!c || (c.type & 0x1000000) === 0) continue; // PENDULUM
+      const r = layout.zones[`s${side}-${i}`];
+      if (!r) continue;
+      const scale = i === 0 ? c.lscale : c.rscale;
+      const bw = Math.max(16, r.w * 0.34);
+      roundRect(ctx, { x: r.x + r.w / 2 - bw / 2, y: r.y - bw * 0.9, w: bw, h: bw * 0.8 }, 3);
+      ctx.fillStyle = 'rgba(232,200,122,0.95)';
+      ctx.fill();
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#1a1408';
+      ctx.font = `700 ${Math.max(8, Math.round(bw * 0.6))}px ui-monospace, Consolas, monospace`;
+      ctx.fillText(String(scale), r.x + r.w / 2, r.y - bw * 0.5);
+    }
   }
 
   /* 4) 손패 */
