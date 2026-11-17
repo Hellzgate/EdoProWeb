@@ -1,0 +1,27 @@
+{
+  "name": "edopro-web-client",
+  "private": true,
+  "type": "module",
+  "description": "EDOPro Web — 새 클라이언트 (DESIGN-V2). P0: 리플레이 파이프라인 검증",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "scan": "node tools/scan.ts",
+    "export": "node tools/export.ts",
+    "genmsg": "node tools/gen-msg.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "lzma": "^2.3.2",
+    "lzma-purejs": "^0.9.3",
+    "preact": "^11.2.0",
+    "xz-decompress": "^0.2.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.0"
+  }
+}

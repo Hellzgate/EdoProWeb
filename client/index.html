@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark light" />
+    <title>EDOPro Web — P0 리플레이 뷰어</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0b0d10;
+        --bg2: #14171c;
+        --bg3: #1b1f26;
+        --line: rgba(255, 255, 255, 0.08);
+        --fg: #e9ecf1;
+        --fg2: #a8b0be;
+        --muted: #79818f;
+        --acc: #6fd3c3;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font: 14px/1.5 system-ui, 'Malgun Gothic', sans-serif;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 12px 20px;
+        background: var(--bg2);
+        border-bottom: 1px solid var(--line);
+        position: sticky;
+        top: 0;
+        z-index: 5;
+      }
+      h1 { margin: 0; font-size: 15px; font-weight: 600; }
+      .tag { font-size: 11.5px; color: var(--muted); }
+      main { padding: 20px; max-width: 1180px; margin: 0 auto; }
+      .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+      button {
+        font: inherit;
+        font-size: 13px;
+        min-height: 32px;
+        padding: 6px 14px;
+        border-radius: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        background: var(--bg3);
+        color: var(--fg);
+        cursor: pointer;
+      }
+      button:hover { background: #22272f; }
+      button.primary { background: #e9ecf1; color: #12151a; border-color: #e9ecf1; font-weight: 600; }
+      input[type='file'] { font-size: 13px; color: var(--fg2); }
+      .panel {
+        background: var(--bg2);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 16px;
+        margin-bottom: 14px;
+      }
+      .kv { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; padding: 4px 0; border-bottom: 1px solid var(--line); }
+      .kv:last-child { border-bottom: 0; }
+      .kv b { color: var(--fg2); font-weight: 500; }
+      .kv span { font-variant-numeric: tabular-nums; }
+      canvas { width: 100%; height: auto; display: block; border-radius: 10px; background: #07110f; }
+      input[type='range'] { flex: 1; min-width: 240px; accent-color: var(--acc); }
+      .mono { font-family: ui-monospace, Consolas, monospace; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>EDOPro Web</h1>
+      <span class="tag">P0 · 리플레이 파이프라인 (상태·렌더 검증)</span>
+    </header>
+    <main>
+      <div class="row">
+        <input id="file" type="file" accept=".yrpX,.yrpx,.yrp" multiple />
+        <button id="load" class="primary">열기</button>
+        <button id="play">▶ 재생</button>
+        <span class="tag" id="hint">리플레이를 선택하세요</span>
+      </div>
+
+      <div class="panel" id="summary">
+        <div class="kv"><b>파일</b><span id="s-file">—</span></div>
+        <div class="kv"><b>플레이어</b><span id="s-names">—</span></div>
+        <div class="kv"><b>패킷 / 턴</b><span id="s-count">—</span></div>
+        <div class="kv"><b>LP (P1 / P2)</b><span id="s-lp">—</span></div>
+        <div class="kv"><b>승자</b><span id="s-win">—</span></div>
+        <div class="kv"><b>마지막 이벤트</b><span id="s-event">—</span></div>
+      </div>
+
+      <div class="row">
+        <input id="seek" type="range" min="0" max="0" value="0" />
+        <span class="tag mono" id="pos">0 / 0</span>
+      </div>
+
+      <canvas id="board" width="1000" height="560"></canvas>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
