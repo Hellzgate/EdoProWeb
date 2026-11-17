@@ -12,7 +12,7 @@ export interface CoreEventMap {
   /** 상태가 바뀌었다(렌더 트리거) */
   state: DuelState;
   /** 응답이 필요하다(선택/옵션/체인/위치) — P2+ */
-  need: { kind: string; payload: Uint8Array };
+  need: { kind: string; type: number; payload: Uint8Array };
   /** 코어 종료 */
   end: { winner: number | null; reason: number | null };
   /** 오류 */

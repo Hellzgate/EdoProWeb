@@ -48,8 +48,12 @@ for path in base:
         continue
     con = connect(path)
     for r in con.execute(
-        "SELECT id, type, atk, def, level, race, attribute FROM datas"
+        "SELECT id, type, atk, def, level, race, attribute, setcode, lscale, rscale, link_marker FROM datas"
     ):
+        sc = int(r[7] or 0) & 0xFFFFFFFFFFFFFFFF
+        sets = [(sc >> (16 * i)) & 0xFFFF for i in range(4)]
+        while sets and sets[-1] == 0:
+            sets.pop()
         datas[int(r[0])] = (
             int(r[1]),
             int(r[2]),
@@ -57,6 +61,10 @@ for path in base:
             int(r[4]),
             int(r[5]),
             int(r[6]),
+            sets,
+            int(r[8] or 0),
+            int(r[9] or 0),
+            int(r[10] or 0),
         )
     con.close()
 
@@ -76,7 +84,21 @@ for cid, d in datas.items():
     name, desc = texts.get(cid, ("", ""))
     if not name:
         missing_name += 1
-    cards.append([cid, name or ("#%d" % cid), d[0], d[1], d[2], d[3], d[4], d[5], desc])
+    cards.append(
+        [
+            cid,
+            name or ("#%d" % cid),
+            *d[:6],
+            desc,
+            "",
+            desc,
+            1,
+            list(d[6]),
+            d[7],
+            d[8],
+            d[9],
+        ]
+    )
 cards.sort(key=lambda x: x[0])
 
 os.makedirs(OUT, exist_ok=True)

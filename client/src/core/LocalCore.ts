@@ -70,6 +70,11 @@ export class LocalCore implements ICore {
   private listeners: { [K in keyof CoreEventMap]?: Array<(v: CoreEventMap[K]) => void> } = {};
   private pending: { type: number; data: Uint8Array } | null = null;
   private ended = false;
+  /** 진단: MSG_RETRY 횟수(응답 형식이 틀렸다는 신호) */
+  retries = 0;
+  /** 진단: 마지막 배치의 메시지 타입/상태 */
+  lastBatch: number[] = [];
+  lastStatus = -1;
   /** 시스템 스크립트 로드 결과(진단용) */
   readonly scriptReport = { loaded: 0, missing: [] as string[] };
 
@@ -88,6 +93,9 @@ export class LocalCore implements ICore {
       moduleUrl: opts.moduleUrl,
     });
     const core = new LocalCore(duel);
+    // ocgcore 는 MSG_START(덱 장수)를 보내지 않는다(호스트가 알려주는 값) → 직접 채운다
+    core.state.deck = [opts.decks[0].main.length, opts.decks[1].main.length];
+    core.state.extra = [(opts.decks[0].extra ?? []).length, (opts.decks[1].extra ?? []).length];
 
     for (const name of SYSTEM_SCRIPTS) {
       if (duel.preloadScript(name)) core.scriptReport.loaded++;
@@ -96,8 +104,9 @@ export class LocalCore implements ICore {
 
     for (let team = 0; team < 2; team++) {
       const deck = opts.decks[team];
-      deck.main.forEach((code, seq) => duel.addCard(team, team, code, team, LOC.DECK, seq, POS_FACEDOWN));
-      (deck.extra ?? []).forEach((code, seq) => duel.addCard(team, team, code, team, LOC.EXTRA, seq, POS_FACEDOWN));
+      // duelist=0 은 일반 듀얼(팀당 1명) — 0 이 아니면 태그용 extra_lists 로 들어가 덱이 빈다
+      deck.main.forEach((code, seq) => duel.addCard(team, 0, code, team, LOC.DECK, seq, POS_FACEDOWN));
+      (deck.extra ?? []).forEach((code, seq) => duel.addCard(team, 0, code, team, LOC.EXTRA, seq, POS_FACEDOWN));
     }
 
     duel.start();
@@ -119,9 +128,13 @@ export class LocalCore implements ICore {
   }
 
   /** 응답 대기 메시지(없으면 null) */
-  get pendingRequest(): { kind: string; payload: Uint8Array } | null {
+  get pendingRequest(): { kind: string; type: number; payload: Uint8Array } | null {
     if (!this.pending) return null;
-    return { kind: MSG_NAME[this.pending.type] ?? String(this.pending.type), payload: this.pending.data };
+    return {
+      kind: MSG_NAME[this.pending.type] ?? String(this.pending.type),
+      type: this.pending.type,
+      payload: this.pending.data,
+    };
   }
 
   on<K extends keyof CoreEventMap>(ev: K, cb: (v: CoreEventMap[K]) => void): () => void {
@@ -150,9 +163,12 @@ export class LocalCore implements ICore {
   private pump(): void {
     for (let guard = 0; guard < 200; guard++) {
       const { status, packets } = this.duel.step();
+      this.lastStatus = status;
+      this.lastBatch = packets.map((p) => p.type);
       for (const p of packets) {
         applyPacket(this.state, { message: p.type, data: p.data });
         this.applied++;
+        if (p.type === 1) this.retries++;
         if (NEED_TYPES.has(p.type)) this.pending = { type: p.type, data: p.data };
         if (p.type === 5) {
           this.ended = true;
@@ -174,10 +190,13 @@ export class LocalCore implements ICore {
         if (this.pending) {
           this.emit('need', {
             kind: MSG_NAME[this.pending.type] ?? String(this.pending.type),
+            type: this.pending.type,
             payload: this.pending.data,
           });
+          return;
         }
-        return;
+        // RETRY 등: 코어가 같은 요청을 다시 보낸다 → 계속 진행
+        continue;
       }
       // CONTINUE: 계속
     }

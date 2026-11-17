@@ -33,7 +33,11 @@ OUT = (
     else os.path.join(ROOT, "public", "data")
 )
 CFG = os.path.join(ROOT, "repos.json")
-CACHE = os.environ.get("REPO_CACHE") or (r"D:\rea-out\_cache\repos" if os.name == "nt" else os.path.expanduser("~/.cache/edopro-repos"))
+CACHE = os.environ.get("REPO_CACHE") or (
+    r"D:\rea-out\_cache\repos"
+    if os.name == "nt"
+    else os.path.expanduser("~/.cache/edopro-repos")
+)
 
 BASE_DIRS = [
     os.environ.get("BASE_CDB_DIR") or os.path.join(ROOT, "basecdb"),
@@ -67,6 +71,8 @@ def base_files():
             out = found
             break
     return out
+
+
 KO_OVERLAYS = [r"D:\edopro\repositories\languages\한국어-3\korean_temp.cdb"]
 
 
@@ -113,10 +119,29 @@ def read_cdb(path, texts_only=False):
     datas, texts = {}, {}
     try:
         if not texts_only:
-            for r in cur.execute(
-                "SELECT id,type,atk,def,level,race,attribute FROM datas"
-            ):
-                datas[int(r[0])] = tuple(int(x or 0) for x in r[1:])
+            cols = {r[1] for r in cur.execute("PRAGMA table_info(datas)")}
+            extra = [
+                c for c in ("setcode", "lscale", "rscale", "link_marker") if c in cols
+            ]
+            sel = (
+                "SELECT id,type,atk,def,level,race,attribute"
+                + "".join(", " + c for c in extra)
+                + " FROM datas"
+            )
+            for r in cur.execute(sel):
+                base = tuple(int(x or 0) for x in r[1:7])
+                ex = {c: int(r[7 + i] or 0) for i, c in enumerate(extra)}
+                sc = ex.get("setcode", 0) & 0xFFFFFFFFFFFFFFFF
+                sets = [(sc >> (16 * i)) & 0xFFFF for i in range(4)]
+                while sets and sets[-1] == 0:
+                    sets.pop()
+                datas[int(r[0])] = (
+                    base,
+                    sets,
+                    ex.get("lscale", 0),
+                    ex.get("rscale", 0),
+                    ex.get("link_marker", 0),
+                )
         for r in cur.execute("SELECT id,name,COALESCE(desc,'') FROM texts"):
             texts[int(r[0])] = (r[1] or "", r[2] or "")
     except sqlite3.Error:
@@ -229,7 +254,22 @@ def main():
         ne, de = en.get(cid, ("", ""))
         name = nk or ne or ("#%d" % cid)
         desc = dk or de
-        cards.append([cid, name, *d, desc, ne or name, de or desc, 1 if nk else 0])
+        base6, sets, ls, rs, lm = d
+        cards.append(
+            [
+                cid,
+                name,
+                *base6,
+                desc,
+                ne or name,
+                de or desc,
+                1 if nk else 0,
+                sets,
+                ls,
+                rs,
+                lm,
+            ]
+        )
     cards.sort(key=lambda x: x[0])
 
     with open(os.path.join(OUT, "cards.json"), "w", encoding="utf-8") as f:
@@ -239,6 +279,23 @@ def main():
             ensure_ascii=False,
             separators=(",", ":"),
         )
+
+    # 스크립트 인덱스(파일명 → 저장소) — ocgcore scriptReader 가 이름으로 찾는다
+    script_root = os.path.join(OUT, "script")
+    index = {}
+    if os.path.isdir(script_root):
+        repos = [
+            d
+            for d in os.listdir(script_root)
+            if os.path.isdir(os.path.join(script_root, d))
+        ]
+        repos.sort(key=lambda d: (d != "delta-bagooska", d))
+        for repo in repos:
+            for f in os.listdir(os.path.join(script_root, repo)):
+                if f.endswith(".lua") and f not in index:
+                    index[f] = repo
+    with open(os.path.join(script_root, "index.json"), "w", encoding="utf-8") as f:
+        json.dump(index, f, ensure_ascii=False, separators=(",", ":"))
 
     with open(os.path.join(OUT, "servers.json"), "w", encoding="utf-8") as f:
         json.dump(cfg.get("servers", []), f, ensure_ascii=False, indent=1)

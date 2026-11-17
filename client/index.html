@@ -60,6 +60,19 @@
       nav .tab.active { color: var(--fg); border-bottom-color: var(--acc); }
       .hidden { display: none !important; }
 
+      /* 로컬 듀얼 */
+      .duel-wrap { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(300px, 0.5fr); gap: 14px; }
+      @media (max-width: 980px) { .duel-wrap { grid-template-columns: minmax(0, 1fr); } }
+      #d-stage { position: relative; border-radius: 12px; overflow: hidden; background: #07110f; }
+      #d-gl, #d-fx { position: absolute; left: 0; top: 0; display: block; }
+      .duel-side .panel { margin-bottom: 12px; }
+      .d-prompt { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+      .d-prompt button { font-size: 12.5px; min-height: 28px; padding: 4px 10px; }
+      .d-prompt button[disabled] { opacity: 0.45; cursor: default; }
+      .d-prompt .sel-locked { opacity: 0.55; border-style: dashed; }
+      .d-log { height: 260px; overflow: auto; font-size: 12px; line-height: 1.5; color: var(--fg2); }
+      .d-log div { border-bottom: 1px solid var(--line); padding: 2px 0; }
+
       /* 덱 편집기 */
       .deck-wrap { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr); gap: 14px; }
       @media (max-width: 900px) { .deck-wrap { grid-template-columns: minmax(0, 1fr); } }
@@ -101,6 +114,7 @@
     </header>
     <nav>
       <button class="tab active" data-tab="replay">리플레이</button>
+      <button class="tab" data-tab="duel">로컬 듀얼</button>
       <button class="tab" data-tab="deck">덱 편집</button>
       <button class="tab" data-tab="data">데이터</button>
     </nav>
@@ -138,6 +152,9 @@
 
       <section id="tab-deck" class="hidden">
         <div id="deck-root"></div>
+      </section>
+      <section id="tab-duel" class="hidden">
+        <div id="duel-root"></div>
       </section>
       <section id="tab-data" class="hidden">
         <div id="data-root"></div>

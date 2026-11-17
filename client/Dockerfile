@@ -4,7 +4,7 @@ FROM nginx:alpine
 
 LABEL org.opencontainers.image.title="edopro-client" \
       org.opencontainers.image.description="EDOPro Web — new client (DESIGN-V2)" \
-      org.opencontainers.image.version="0.4.0"
+      org.opencontainers.image.version="0.7.0"
 
 # 갱신 API + 스크립트 실행용 (git/python/bash)
 RUN apk add --no-cache python3 bash git coreutils

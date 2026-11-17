@@ -3,12 +3,13 @@
  * 필드 좌표는 render/field.ts 가 단일 소스(docs/YGO-FIELD-LAYOUT.md).
  */
 import { parseYrpx, type ReplayPacket } from './engine/yrpx.ts';
-import { PHASE_NAMES, type DuelState } from './engine/state.ts';
+import { phaseName, type DuelState } from './engine/state.ts';
 import { ReplayCore } from './core/ReplayCore.ts';
 import { BoardRenderer } from './render/BoardRenderer.ts';
 import { layoutField, paintState } from './render/field.ts';
 import { DeckEditor } from './ui/DeckEditor.ts';
 import { DataPanel } from './ui/DataPanel.ts';
+import { DuelScreen } from './ui/DuelScreen.ts';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -142,7 +143,7 @@ function draw(): void {
     fx.font = '600 13px ui-monospace, Consolas, monospace';
     fx.fillStyle = 'rgba(111,211,195,0.95)';
     fx.textAlign = 'center';
-    fx.fillText(`TURN ${s.turn} · ${PHASE_NAMES[s.phase] ?? s.phase}`, w / 2, h / 2 - 6);
+    fx.fillText(`TURN ${s.turn} · ${phaseName(s.phase)}`, w / 2, h / 2 - 6);
     if (s.chain.length) {
       fx.font = '11px ui-monospace, Consolas, monospace';
       fx.fillStyle = 'rgba(255,255,255,0.72)';
@@ -236,6 +237,7 @@ function boot(): void {
 
   let deck: DeckEditor | null = null;
   let data: DataPanel | null = null;
+  let duel: DuelScreen | null = null;
   document.querySelectorAll<HTMLButtonElement>('nav .tab').forEach((btn) => {
     btn.addEventListener('click', () => {
       const tab = btn.dataset.tab!;
@@ -243,8 +245,10 @@ function boot(): void {
       $('tab-replay').classList.toggle('hidden', tab !== 'replay');
       $('tab-deck').classList.toggle('hidden', tab !== 'deck');
       $('tab-data').classList.toggle('hidden', tab !== 'data');
+      $('tab-duel').classList.toggle('hidden', tab !== 'duel');
       if (tab === 'deck' && !deck) deck = new DeckEditor($('deck-root'));
       if (tab === 'data' && !data) data = new DataPanel($('data-root'));
+      if (tab === 'duel' && !duel) duel = new DuelScreen($('duel-root'));
     });
   });
 

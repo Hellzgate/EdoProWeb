@@ -13,6 +13,27 @@ export interface Card {
   desc: string;
   descEn: string;
   hasKo: boolean;
+  /** ocgcore CardData 용 (cards.json 12~15) */
+  setcodes: number[];
+  lscale: number;
+  rscale: number;
+  linkMarker: number;
+}
+
+/** Card → ocgcore CardData (LocalCore.cardSource 용) */
+export function toCardInfo(c: Card) {
+  return {
+    type: c.type,
+    level: c.level,
+    attr: c.attr,
+    race: c.race,
+    atk: c.atk,
+    def: c.def,
+    setcodes: c.setcodes,
+    lscale: c.lscale,
+    rscale: c.rscale,
+    linkMarker: c.linkMarker,
+  };
 }
 
 export const TYPE = {
@@ -49,7 +70,10 @@ export const isExtraDeck = (c: Card) =>
 let cache: Card[] | null = null;
 let byId: Map<number, Card> | null = null;
 
-type Row = [number, string, number, number, number, number, number, number, string, string?, string?, number?];
+type Row = [
+  number, string, number, number, number, number, number, number, string,
+  string?, string?, number?, number[]?, number?, number?, number?,
+];
 
 export async function loadCards(): Promise<Card[]> {
   if (cache) return cache;
@@ -69,6 +93,10 @@ export async function loadCards(): Promise<Card[]> {
     nameEn: r[9] ?? r[1],
     descEn: r[10] ?? r[8],
     hasKo: (r[11] ?? 0) === 1,
+    setcodes: r[12] ?? [],
+    lscale: r[13] ?? 0,
+    rscale: r[14] ?? 0,
+    linkMarker: r[15] ?? 0,
   }));
   byId = new Map(cache.map((c) => [c.id, c]));
   return cache;

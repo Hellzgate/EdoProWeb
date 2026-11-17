@@ -35,6 +35,17 @@ export const PHASE_NAMES = [
   'END',
 ] as const;
 
+/**
+ * ocgcore 의 NEW_PHASE 값은 **비트 플래그**다(PHASE_DRAW=0x01 … PHASE_END=0x200).
+ * PHASE_NAMES 는 비트 위치 순서이므로 log2 로 인덱스를 구한다.
+ */
+export function phaseName(phase: number): string {
+  if (!phase) return '—';
+  if ((phase & (phase - 1)) !== 0) return String(phase);
+  const i = Math.log2(phase);
+  return PHASE_NAMES[i] ?? String(phase);
+}
+
 export interface StackCard {
   code: number;
   ctrl: number;
@@ -156,7 +167,7 @@ export function applyPacket(s: DuelState, p: ReplayPacket): void {
     }
     case MSG.NEW_PHASE: {
       s.phase = readU16(d, 0);
-      s.lastEvent = 'PHASE ' + (PHASE_NAMES[s.phase] ?? s.phase);
+      s.lastEvent = 'PHASE ' + phaseName(s.phase);
       break;
     }
     case MSG.DRAW: {
