@@ -15,7 +15,7 @@ COMMON="-O2 -w -std=c++17 -fno-rtti -DFMT_HEADER_ONLY -I$E -I$E/lua/src"
 
 cd "$E" || exit 1
 for f in $CORE; do
-  emcc $COMMON -fno-exceptions -c "$f" -o "$OBJ/core/${f%.cpp}.o" 2>"$OUT/err_${f}.log" || { echo "FAIL $f"; head -3 "$OUT/err_${f}.log"; }
+  emcc $COMMON -fexceptions -c "$f" -o "$OBJ/core/${f%.cpp}.o" 2>"$OUT/err_${f}.log" || { echo "FAIL $f"; head -3 "$OUT/err_${f}.log"; }
 done
 cd "$E/lua/src" || exit 1
 for f in $LUA; do
@@ -24,7 +24,7 @@ done
 echo "obj: core=$(ls "$OBJ"/core/*.o | wc -l) lua=$(ls "$OBJ"/lua/*.o | wc -l)"
 
 CORE_EXPORTS=$(python3 "$HOME/gen-exports.py" "$E/ocgapi.h" 2>"$OUT/exports.log")
-WEB_EXPORTS='"_malloc","_free","_web_create_duel","_web_start_duel","_web_process","_web_get_message","_web_set_response_int","_web_set_response_buf","_web_destroy_duel"'
+WEB_EXPORTS='"_malloc","_free","_web_create_duel","_web_last_create_status","_web_start_duel","_web_process","_web_get_message","_web_msg_length","_web_set_response_int","_web_set_response_buf","_web_destroy_duel","_web_new_card","_web_load_script","_web_get_version"'
 echo "exports(core): $(tail -2 "$OUT/exports.log" | head -1)"
 
 em++ "$OBJ"/core/*.o "$OBJ"/lua/*.o -o "$OUT/ocgcore.js" \
@@ -32,6 +32,7 @@ em++ "$OBJ"/core/*.o "$OBJ"/lua/*.o -o "$OUT/ocgcore.js" \
   -sEXPORTED_FUNCTIONS="[$CORE_EXPORTS,$WEB_EXPORTS]" \
   -sEXPORTED_RUNTIME_METHODS='["ccall","cwrap","addFunction","removeFunction","HEAPU8","HEAP32","HEAPU32","UTF8ToString","stringToUTF8","lengthBytesUTF8"]' \
   -sALLOW_MEMORY_GROWTH=1 -sALLOW_TABLE_GROWTH=1 -sFILESYSTEM=0 -sWASM=1 \
+  -fexceptions \
   -sINITIAL_MEMORY=33554432 -sSTACK_SIZE=1048576 2>&1 | tail -3
 
 ls -lh "$OUT"/ocgcore.js "$OUT"/ocgcore.wasm 2>/dev/null

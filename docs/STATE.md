@@ -1,89 +1,111 @@
 # EDOPro Web — 현재 상태 / 다음 작업 (인수인계)
 
-> 새 세션은 **이 파일만 읽고** 이어서 시작한다. (2026-11-17 기준, 커밋 `d7cafb7`)
+> 새 세션은 **이 파일만 읽고** 이어서 시작한다. (2026-11-17 기준)
+> 마지막 커밋: `4f5fe5e` 이후 → 이번 작업(코어 링크 성공 + 실제 듀얼 검증) 커밋 예정.
 
 ## 1. 한 줄 상태
 
-DESIGN-V2 의 **P0 · P1 · P4 · P5(셸) · P2(코어 빌드)** 완료.
-**다음 = P2 마무리(LocalCore 배선) → P3(온라인)**.
+**P2(ocgcore WASM) 완료** — 링크 성공, 실제 카드·스크립트로 **드로우 → 소환 → 필드 이동**까지 검증.
+**다음 = P2-b `LocalCore.ts` 배선** (JS/Worker) → P3(온라인).
 
-## 2. 배포 (미니PC 도커)
+## 2. 이번에 뚫은 것 (중요 — 다시 헤매지 말 것)
+
+### 2.1 링크 성공 조건 4가지
+| 문제 | 해결 |
+|---|---|
+| C++ 심볼 미해결 | 링크는 **`em++`** (emcc 아님) |
+| export 이름 | 이 코어는 **`OCG_` 접두사** → `tools/gen-exports.py` 가 `ocgapi.h` 에서 추출 |
+| Lua 가 throw | **Lua 만 `-fexceptions`** + `liolib.c` 필수(`luaopen_io`) |
+| **상태 5 `INCOMPATIBLE_LUA_API`** | **코어도 `-fexceptions`** 로 컴파일해야 함. `interpreter.cpp` 의 검사 함수가 "스택 풀기 중 소멸자가 도는지"를 보므로 `-fno-exceptions` 코어에서는 실패한다 |
+
+산출: `public/wasm/ocgcore.wasm` **1.7MB**, `ocgcore.js` 91KB, OCG v11.0.
+
+### 2.2 ocgcore C API 실측 (추측 금지 — 헤더가 정답)
+```c
+int   OCG_CreateDuel(OCG_Duel* out, const OCG_DuelOptions* opts);  // 실패 시 0 아닌 status
+void  OCG_StartDuel(OCG_Duel);                                     // **void**
+int   OCG_DuelProcess(OCG_Duel);      // 0=END 1=AWAITING 2=CONTINUE
+void* OCG_DuelGetMessage(OCG_Duel, uint32_t* len);                 // **내부 버퍼 포인터**
+void  OCG_DuelSetResponse(OCG_Duel, const void* buf, uint32_t len);
+void  OCG_DestroyDuel(OCG_Duel);
+void  OCG_DuelNewCard(OCG_Duel, const OCG_NewCardInfo* info);
+int   OCG_LoadScript(OCG_Duel, const char* buf, uint32_t len, const char* name);
+```
+`OCG_CardData` 순서(wasm32): code0 · alias4 · **setcodes(ptr)8** · type12 · level16 · attribute20 · race(u64)24 · atk32 · def36 · lscale40 · rscale44 · link_marker48
+`OCG_DuelOptions`: seed[4](u64×4) · flags · **team1(startingLP, startHand, drawPerTurn)** · team2 · cardReader(+payload) · scriptReader(+payload) · logHandler(+payload) · cardReaderDone(+payload) · enableUnsafeLibraries
+
+### 2.3 메시지 버퍼 형식 (이게 핵심 함정)
+- `OCG_DuelProcess` 가 `buff.clear()` 후 `process()` 루프 → **배치**로 쌓는다.
+- `OCG_DuelGetMessage` 는 **배치 전체**를 반환하고 **다음 process 전까지 유지**(호출해도 비워지지 않는다 → 반복 호출하면 무한 루프).
+- 배치 안의 각 메시지 = **`[u32 size][type u8][payload (size-1)]`** — `size` 는 type 포함, **4바이트 정렬 보장 없음** → `DataView.getUint32(off, true)` 로 읽어야 한다. (`HEAPU32[(p+off)>>2]` 는 정렬 때문에 오독)
+- 응답은 `web_set_response_buf`/`web_set_response_int` 로 **길이까지 정확히**(예: `SELECT_CHAIN` = `u32 0xFFFFFFFF` = 체인 없음).
+
+### 2.4 시스템 스크립트는 **호스트가 선행 로드**해야 한다
+`constant.lua` · `utility.lua` · `archetype_setcode_constants.lua` · `card_counter_constants.lua` ·
+`cards_specific_functions.lua` · `deprecated_functions.lua` · `chain.lua` · `proc_*.lua`(14종) — **21개**
+→ create 직후 `OCG_LoadScript(duel, src, len, name)` 로 넣는다. 빠지면 `proc_equip/proc_persistent/proc_gemini/debug_utility` 미스가 나고 효과 동작이 깨진다.
+
+## 3. 검증 명령 (실측 결과)
+
+```bash
+node public/wasm/wasm-smoke.mjs     # OCG v11.0 · SMOKE OK
+node public/wasm/wasm-abi.mjs       # 8개 export true → create/start/process/메시지 파싱 OK
+node tools/duel-test.mjs            # 실제 카드 22,654 + 스크립트 4,973
+```
+`duel-test.mjs` 실측: `DRAW×1 SUMMONING×1 SUMMONED×1 MOVE×1 SELECT_PLACE×1 SELECT_IDLECMD×2`
+→ **실제 카드/스크립트로 드로우·소환·필드 이동까지 성공**. 남은 것: RETRY 63회(응답 정책 미완성), `WIN reason=2` 조기 종료 원인 미확인.
+
+## 4. 다음 작업
+
+### P2-b `src/core/LocalCore.ts` (ICore 구현)
+- 계약: `src/core/ICore.ts` (`mode/length/cursor/on/seek/step/respond/dispose`)
+- 상태기계 재사용: `src/engine/state.ts` 의 `applyPacket(s, {message, data})` — `data` 는 **type 바이트 제외** payload
+- 흐름: `create` → 시스템 스크립트 21개 로드 → `web_new_card`×덱 → `start` →
+  `process → get_message(배치) → 패킷 분해 → applyPacket → (AWAITING 이면) need 이벤트 → respond`
+- 브라우저에서는 `public/wasm/ocgcore.js` 를 `import(/* @vite-ignore */ '/wasm/ocgcore.js')` 로 로드
+- 카드/스크립트 소스: `/data/cards.json`, `/data/script/<repo>/*.lua` (fetch 1회 + Map 캐시)
+
+### P2-c 남은 정확도
+- **`setcodes` 미수집**: `cards.json` 에 setcode 가 없어 `IsSetCard` 계열이 전부 실패한다 → `tools/cards.py` 로 cdb `datas.setcode` 를 **추가 수집**(최대 4개, 0 종료) 후 cardReader 에서 채울 것
+- lscale/rscale/link_marker 도 0 → 펜듈럼/링크 카드 동작 불가(같은 작업에서 수집)
+- 응답 정책(선택 UI) — `SELECT_IDLECMD`/`SELECT_CHAIN` 의 유효 응답 규칙을 `processor.cpp` 에서 확인
+
+### P3 `RemoteCore`(WS) — `/ws` 브리지 + `JoinGame(41.0)`
+
+## 5. 배포 (미니PC 도커 · 변경 없음)
 
 | 항목 | 값 |
 |---|---|
 | 컨테이너 | `edopro-client:0.6.0` · `--restart unless-stopped` · **:7560** |
 | 주소 | http://192.168.0.53:7560/ |
-| 데이터 | 볼륨 `/home/hellzsub/edopro-data` → `/data` (ro 아님 · 갱신이 씀) |
-| 갱신 | 웹 `데이터` 탭 → **[지금 갱신]** (토큰 없음 · 30초 쿨다운) |
-| 빌드/배포 | `scp dist + Dockerfile + server/api.py + tools/* + basecdb` → `docker build -t edopro-client:X` → `docker rm -f` → `docker run ... -v ~/edopro-data:/data` |
+| 데이터 | 볼륨 `/home/hellzsub/edopro-data` → `/data` |
+| 갱신 | 웹 `데이터` 탭 → **[지금 갱신]** (무토큰 · 30초 쿨다운 · 동시 1회) |
 
-## 3. 완료된 것
-
-| 단계 | 내용 | 검증 |
-|---|---|---|
-| **P0** | `.yrpX` 파서 · MSG 95종 · 결정적 상태기계 · 골든 테스트 | 686/687 · 잔여 0B · 1,083,139패킷 |
-| **P1** | `ICore` · `ReplayCore`(스냅샷 되감기) · **WebGL2 2.5D** · 텍스트 오버레이 | 끝/되감기/스텝 OK |
-| **P4** | 카드 인덱스(cdb+한/영 병기) · 덱 편집기(언어·번역만·**키워드 검색**) | 22,654장(한 17,073/영 5,581) |
-| **P5(셸)** | manifest · sw.js · 반응형 · 아이콘 | 모바일 가로스크롤 0 |
-| **P2(빌드)** | **ocgcore+lua → WASM** | **1.3MB · OCG v11.0 · 심볼 4개 확인(SMOKE OK)** |
-| 데이터 | 레포 8개 동기화(EDOPro configs 그대로) + base cdb 5종 | 스크립트 4,974 · 금제 8 · 퍼즐 459 |
-
-## 4. 다음 작업 (이 순서)
-
-### P2-a `src/core/LocalCore.ts`
-```ts
-// OCG_DuelOptions (ocgapi_types.h 실측)
-//   uint64 seed[4](0..31) · uint64 flags(32) · OCG_Player team1/team2 ·
-//   DataReader cardReader(+payload1) · ScriptReader scriptReader(+payload2) ·
-//   LogHandler logHandler(+payload3) · DataReaderDone(+payload4) · uint8 enableUnsafeLibraries
-M.addFunction(cardReader, 'viip')   // (payload, code, OCG_CardData*)
-M.addFunction(scriptReader, 'iiip') // (payload, duel, name) -> int
-M._OCG_CreateDuel(&duel, opts)      // by-value struct → 포인터 전달
-M._OCG_StartDuel(duel)
-while (!M._OCG_DuelProcess(duel)) { /* OCG_DuelGetMessage */ }
-```
-- 카드 리더: `public/data/cards.json` (이미 있음)
-- 스크립트 리더: `public/data/script/<repo>/*.lua` (4,974개)
-- 응답: `OCG_DuelSetResponse` ← `ICore.respond`
-
-### P2-b 퍼즐 1개 클리어 → `ReplayCore` 와 같은 상태기계에 연결
-### P3 `RemoteCore`(WS) — 기존 포팅의 `/ws` 브리지 + `JoinGame(41.0)`
-
-## 5. 함정 (다시 밟지 말 것)
+## 6. 함정 목록
 
 | 함정 | 해결 |
 |---|---|
-| 링크에 `emcc` | **`em++`** (C++ 심볼) |
-| export 이름 | 이 코어는 **`OCG_` 접두사** → `tools/gen-exports.py` 로 `ocgapi.h` 에서 추출 |
-| Lua 빌드 | `ldo.c` 가 throw → **Lua 만 `-fexceptions`**, `liolib.c` **필수**(`luaopen_io`) |
-| wasm 심볼 | `_malloc`/`_free` 를 EXPORTED_FUNCTIONS 에 추가해야 함 |
-| 바인드 마운트 | `/data` **rename 불가(EBUSY)** → `$OUT/.tmp` 에 만들고 **항목별 mv** |
-| 브라우저 LZMA | `lzma`(→`__dirname`), `lzma-purejs`(→AMD `define.apply`) 둘 다 번들에서 죽음 → **Node/서버에서 해제** |
-| 페이로드 레이아웃 | MOVE **28B**, SUMMONING **14B**, START **17B**(deck0·extra0·deck1·extra1) |
-| 기본 카드DB | 컨테이너엔 `expansions/*.cdb` 가 없다 → `client/basecdb/` (git 제외) + `BASE_CDB_DIR` |
-| 기존 포팅 | `edopro-web:1.25.5`(7556) 는 **참조 구현**으로 보존 |
+| 링크 `emcc` | **`em++`** |
+| export 이름 추측 | `ocgapi.h` 에서 `OCG_*` 자동 추출 |
+| Lua throw | Lua+코어 **모두 `-fexceptions`**, `liolib.c` 필수 |
+| `get_message` 반복 호출 | 배치는 **유지**된다 → 1회만 읽고 파싱, 다음은 `process` |
+| 배치 메시지 파싱 | `[u32 size][type][payload]`, **비정렬** → `DataView` |
+| 메시지 번호 | `MOVE=50`, `SET=54`, `SUMMONING=60`, `SPSUMMONING=62`, `NEW_TURN=40`, `DRAW=90` (`src/engine/msg.ts` 가 정답) |
+| 시스템 스크립트 | 호스트가 21개 선행 `OCG_LoadScript` |
+| 바인드 마운트 | `/data` rename 불가(EBUSY) → `$OUT/.tmp` 후 항목별 mv |
+| 브라우저 LZMA | `lzma`/`lzma-purejs` 번들 사망 → 서버/Node 전용 |
+| 페이로드 레이아웃(리플레이) | MOVE 28B · SUMMONING 14B · START 17B |
 
-## 6. 파일 지도
+## 7. 파일 지도
 
 ```
-client/src/engine/   yrpx.ts(파서) · state.ts(상태기계) · msg.ts(자동생성)
-client/src/core/     ICore.ts · ReplayCore.ts        ← LocalCore.ts 추가 예정
-client/src/render/   BoardRenderer.ts(WebGL2) · field.ts(필드 좌표 단일 소스)
-client/src/ui/       DeckEditor.ts · DataPanel.ts
-client/src/data/     carddb.ts(한/영·키워드검색)
-client/tools/        sync-data.py · refresh.sh · cards.py · build-core.sh · gen-exports.py
-client/server/api.py 데이터 갱신 API(무토큰·30초 쿨다운)
-client/public/wasm/  ocgcore.js/.wasm (1.3MB) · wasm-smoke.mjs
-docs/                DESIGN-V2 · GAP-ANALYSIS · DATA-REPOS · YGO-FIELD-LAYOUT
-```
-
-## 7. 검증 명령
-
-```bash
-cd client
-npm run typecheck && npm test && npm run build      # 3/3 통과 기준
-npm run scan                                        # 리플레이 686/687 · 잔여 0B
-node public/wasm/wasm-smoke.mjs                     # OCG v11.0 · SMOKE OK
-python tools/sync-data.py --no-net                  # 22,654장
-bash tools/refresh.sh ~/edopro-data                 # 컨테이너 갱신(미니PC)
+client/wasm/webapi.cpp        ocgcore C 심(create/start/process/get_message/response/new_card/load_script)
+client/tools/build-core.sh    wasm 빌드(17 core + 26 lua, em++ 링크, -fexceptions)
+client/tools/gen-exports.py   ocgapi.h → EXPORTS
+client/tools/duel-test.mjs    실제 카드·스크립트 듀얼 검증
+client/public/wasm/           ocgcore.js/.wasm(1.7MB) · wasm-smoke.mjs · wasm-abi.mjs
+client/src/core/              ICore.ts · ReplayCore.ts  ← LocalCore.ts 추가 예정
+client/src/engine/            state.ts · msg.ts · yrpx.ts
+client/src/render/            BoardRenderer.ts(WebGL2) · field.ts
+docs/                         DESIGN-V2 · GAP-ANALYSIS · DATA-REPOS · YGO-FIELD-LAYOUT · STATE
 ```

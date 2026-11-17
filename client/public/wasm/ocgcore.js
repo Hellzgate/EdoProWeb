@@ -292,9 +292,19 @@ var isFileURI = (filename) => filename.startsWith('file://');
 // include: runtime_common.js
 // include: runtime_exceptions.js
 // Base Emscripten EH error class
-class EmscriptenEH {}
+class EmscriptenEH extends Error {}
 
 class EmscriptenSjLj extends EmscriptenEH {}
+
+class CppException extends EmscriptenEH {
+  constructor(excPtr) {
+    super(excPtr);
+    this.excPtr = excPtr;
+    const excInfo = getExceptionMessage(this);
+    this.name = excInfo[0];
+    this.message = excInfo[1];
+  }
+}
 
 // end include: runtime_exceptions.js
 // include: runtime_debug.js
@@ -910,6 +920,7 @@ async function createWasm() {
       exceptionCaught.push(info);
       return ___cxa_get_exception_ptr(ptr);
     };
+  var exceptionLast = null;
   var ___cxa_end_catch = () => {
       // Clear state flag.
       _setThrew(0, 0);
@@ -918,22 +929,85 @@ async function createWasm() {
       var info = exceptionCaught.pop();
   
       ___cxa_decrement_exception_refcount(info.excPtr);
+      exceptionLast = null; // XXX in decRef?
     };
   var setTempRet0 = (val) => __emscripten_tempret_set(val);
   var findMatchingCatch = (args) => {
-      setTempRet0(0);
-      return 0;
+      var thrown = exceptionLast?.excPtr;
+      if (!thrown) {
+        // just pass through the null ptr
+        setTempRet0(0);
+        return 0;
+      }
+      var info = new ExceptionInfo(thrown);
+      info.set_adjusted_ptr(thrown);
+      var thrownType = info.get_type();
+      if (!thrownType) {
+        // just pass through the thrown ptr
+        setTempRet0(0);
+        return thrown;
+      }
+  
+      // can_catch receives a **, add indirection
+      // The different catch blocks are denoted by different types.
+      // Due to inheritance, those types may not precisely match the
+      // type of the thrown object. Find one which matches, and
+      // return the type of the catch block which should be called.
+      for (var caughtType of args) {
+        if (!caughtType || caughtType === thrownType) {
+          // Catch all clause matched or exactly the same type is caught
+          break;
+        }
+        var adjusted_ptr_addr = info.ptr + 16;
+        if (___cxa_can_catch(caughtType, thrownType, adjusted_ptr_addr)) {
+          setTempRet0(caughtType);
+          return thrown;
+        }
+      }
+      setTempRet0(thrownType);
+      return thrown;
     };
+  var ___cxa_find_matching_catch_2 = () => findMatchingCatch([]);
   var ___cxa_find_matching_catch_3 = (arg0) => findMatchingCatch([arg0]);
+  var decrementExceptionRefcount = (exn) => ___cxa_decrement_exception_refcount(exn.excPtr);
+  var stackAlloc = (sz) => __emscripten_stack_alloc(sz);
+  var getExceptionMessageCommon = (ptr) => {
+      var sp = stackSave();
+      var type_addr_addr = stackAlloc(4);
+      var message_addr_addr = stackAlloc(4);
+      ___get_exception_message(ptr, type_addr_addr, message_addr_addr);
+      var type_addr = HEAPU32[((type_addr_addr)>>2)];
+      var message_addr = HEAPU32[((message_addr_addr)>>2)];
+      var type = UTF8ToString(type_addr);
+      _free(type_addr);
+      var message;
+      if (message_addr) {
+        message = UTF8ToString(message_addr);
+        _free(message_addr);
+      }
+      stackRestore(sp);
+      return [type, message];
+    };
+  var getExceptionMessage = (exn) => getExceptionMessageCommon(exn.excPtr);
+  var incrementExceptionRefcount = (exn) => ___cxa_increment_exception_refcount(exn.excPtr);
   var __Unwind_RaiseException = (ex) => {
-      assert(false, 'Exception thrown, but exception catching is not enabled. Compile with -sNO_DISABLE_EXCEPTION_CATCHING or -sEXCEPTION_CATCHING_ALLOWED=[..] to catch.');
+      throw ex;
     };
   var ___cxa_throw = (ptr, type, destructor) => {
       var info = new ExceptionInfo(ptr);
       // Initialize ExceptionInfo content after it was allocated in __cxa_allocate_exception.
       info.init(type, destructor);
+      ___cxa_increment_exception_refcount(ptr);
+      ptr = exceptionLast = new CppException(ptr);
       uncaughtExceptionCount++;
       __Unwind_RaiseException(ptr);
+    };
+  var __Unwind_Resume = (ex) => {
+      throw ex;
+    };
+  var ___resumeException = (ptr) => {
+      ptr = exceptionLast ??= new CppException(ptr);
+      __Unwind_Resume(ptr);
     };
   var ___syscall_dup3 = (fd, newfd, flags) => {
   abort('it should not be possible to operate on streams when !SYSCALLS_REQUIRE_FILESYSTEM');
@@ -1137,7 +1211,6 @@ async function createWasm() {
       assert(func, `Cannot call unknown function ${ident}, make sure it is exported`);
       return func;
     };
-  var stackAlloc = (sz) => __emscripten_stack_alloc(sz);
   var lengthBytesUTF8 = (str) => {
       var len = 0;
       for (var i = 0; i < str.length; ++i) {
@@ -1710,9 +1783,14 @@ missingLibrarySymbols.forEach(missingLibrarySymbol)
   'emClearImmediate',
   'promiseMap',
   'uncaughtExceptionCount',
+  'exceptionLast',
   'exceptionCaught',
   'ExceptionInfo',
   'findMatchingCatch',
+  'getExceptionMessageCommon',
+  'incrementExceptionRefcount',
+  'decrementExceptionRefcount',
+  'getExceptionMessage',
   'Browser',
   'requestFullscreen',
   'setCanvasSize',
@@ -1791,6 +1869,18 @@ var _OCG_DuelQueryCount = Module['_OCG_DuelQueryCount'] = makeInvalidEarlyAccess
 var _OCG_DuelQuery = Module['_OCG_DuelQuery'] = makeInvalidEarlyAccess('_OCG_DuelQuery');
 var _OCG_DuelQueryLocation = Module['_OCG_DuelQueryLocation'] = makeInvalidEarlyAccess('_OCG_DuelQueryLocation');
 var _OCG_DuelQueryField = Module['_OCG_DuelQueryField'] = makeInvalidEarlyAccess('_OCG_DuelQueryField');
+var _web_create_duel = Module['_web_create_duel'] = makeInvalidEarlyAccess('_web_create_duel');
+var _web_last_create_status = Module['_web_last_create_status'] = makeInvalidEarlyAccess('_web_last_create_status');
+var _web_start_duel = Module['_web_start_duel'] = makeInvalidEarlyAccess('_web_start_duel');
+var _web_process = Module['_web_process'] = makeInvalidEarlyAccess('_web_process');
+var _web_get_message = Module['_web_get_message'] = makeInvalidEarlyAccess('_web_get_message');
+var _web_msg_length = Module['_web_msg_length'] = makeInvalidEarlyAccess('_web_msg_length');
+var _web_set_response_int = Module['_web_set_response_int'] = makeInvalidEarlyAccess('_web_set_response_int');
+var _web_set_response_buf = Module['_web_set_response_buf'] = makeInvalidEarlyAccess('_web_set_response_buf');
+var _web_destroy_duel = Module['_web_destroy_duel'] = makeInvalidEarlyAccess('_web_destroy_duel');
+var _web_new_card = Module['_web_new_card'] = makeInvalidEarlyAccess('_web_new_card');
+var _web_load_script = Module['_web_load_script'] = makeInvalidEarlyAccess('_web_load_script');
+var _web_get_version = Module['_web_get_version'] = makeInvalidEarlyAccess('_web_get_version');
 var _free = Module['_free'] = makeInvalidEarlyAccess('_free');
 var _fflush = makeInvalidEarlyAccess('_fflush');
 var _malloc = Module['_malloc'] = makeInvalidEarlyAccess('_malloc');
@@ -1803,7 +1893,10 @@ var _emscripten_stack_get_free = makeInvalidEarlyAccess('_emscripten_stack_get_f
 var __emscripten_stack_restore = makeInvalidEarlyAccess('__emscripten_stack_restore');
 var __emscripten_stack_alloc = makeInvalidEarlyAccess('__emscripten_stack_alloc');
 var _emscripten_stack_get_current = makeInvalidEarlyAccess('_emscripten_stack_get_current');
+var ___cxa_increment_exception_refcount = makeInvalidEarlyAccess('___cxa_increment_exception_refcount');
 var ___cxa_decrement_exception_refcount = makeInvalidEarlyAccess('___cxa_decrement_exception_refcount');
+var ___get_exception_message = makeInvalidEarlyAccess('___get_exception_message');
+var ___cxa_can_catch = makeInvalidEarlyAccess('___cxa_can_catch');
 var ___cxa_get_exception_ptr = makeInvalidEarlyAccess('___cxa_get_exception_ptr');
 var memory = makeInvalidEarlyAccess('memory');
 var __indirect_function_table = makeInvalidEarlyAccess('__indirect_function_table');
@@ -1825,6 +1918,18 @@ function assignWasmExports(wasmExports) {
   assert(typeof wasmExports['OCG_DuelQuery'] !== 'undefined', 'missing Wasm export: OCG_DuelQuery');
   assert(typeof wasmExports['OCG_DuelQueryLocation'] !== 'undefined', 'missing Wasm export: OCG_DuelQueryLocation');
   assert(typeof wasmExports['OCG_DuelQueryField'] !== 'undefined', 'missing Wasm export: OCG_DuelQueryField');
+  assert(typeof wasmExports['web_create_duel'] !== 'undefined', 'missing Wasm export: web_create_duel');
+  assert(typeof wasmExports['web_last_create_status'] !== 'undefined', 'missing Wasm export: web_last_create_status');
+  assert(typeof wasmExports['web_start_duel'] !== 'undefined', 'missing Wasm export: web_start_duel');
+  assert(typeof wasmExports['web_process'] !== 'undefined', 'missing Wasm export: web_process');
+  assert(typeof wasmExports['web_get_message'] !== 'undefined', 'missing Wasm export: web_get_message');
+  assert(typeof wasmExports['web_msg_length'] !== 'undefined', 'missing Wasm export: web_msg_length');
+  assert(typeof wasmExports['web_set_response_int'] !== 'undefined', 'missing Wasm export: web_set_response_int');
+  assert(typeof wasmExports['web_set_response_buf'] !== 'undefined', 'missing Wasm export: web_set_response_buf');
+  assert(typeof wasmExports['web_destroy_duel'] !== 'undefined', 'missing Wasm export: web_destroy_duel');
+  assert(typeof wasmExports['web_new_card'] !== 'undefined', 'missing Wasm export: web_new_card');
+  assert(typeof wasmExports['web_load_script'] !== 'undefined', 'missing Wasm export: web_load_script');
+  assert(typeof wasmExports['web_get_version'] !== 'undefined', 'missing Wasm export: web_get_version');
   assert(typeof wasmExports['free'] !== 'undefined', 'missing Wasm export: free');
   assert(typeof wasmExports['fflush'] !== 'undefined', 'missing Wasm export: fflush');
   assert(typeof wasmExports['malloc'] !== 'undefined', 'missing Wasm export: malloc');
@@ -1837,7 +1942,10 @@ function assignWasmExports(wasmExports) {
   assert(typeof wasmExports['_emscripten_stack_restore'] !== 'undefined', 'missing Wasm export: _emscripten_stack_restore');
   assert(typeof wasmExports['_emscripten_stack_alloc'] !== 'undefined', 'missing Wasm export: _emscripten_stack_alloc');
   assert(typeof wasmExports['emscripten_stack_get_current'] !== 'undefined', 'missing Wasm export: emscripten_stack_get_current');
+  assert(typeof wasmExports['__cxa_increment_exception_refcount'] !== 'undefined', 'missing Wasm export: __cxa_increment_exception_refcount');
   assert(typeof wasmExports['__cxa_decrement_exception_refcount'] !== 'undefined', 'missing Wasm export: __cxa_decrement_exception_refcount');
+  assert(typeof wasmExports['__get_exception_message'] !== 'undefined', 'missing Wasm export: __get_exception_message');
+  assert(typeof wasmExports['__cxa_can_catch'] !== 'undefined', 'missing Wasm export: __cxa_can_catch');
   assert(typeof wasmExports['__cxa_get_exception_ptr'] !== 'undefined', 'missing Wasm export: __cxa_get_exception_ptr');
   assert(typeof wasmExports['memory'] !== 'undefined', 'missing Wasm export: memory');
   assert(typeof wasmExports['__indirect_function_table'] !== 'undefined', 'missing Wasm export: __indirect_function_table');
@@ -1855,6 +1963,18 @@ function assignWasmExports(wasmExports) {
   _OCG_DuelQuery = Module['_OCG_DuelQuery'] = createExportWrapper('OCG_DuelQuery', wasmExports['OCG_DuelQuery'], 3);
   _OCG_DuelQueryLocation = Module['_OCG_DuelQueryLocation'] = createExportWrapper('OCG_DuelQueryLocation', wasmExports['OCG_DuelQueryLocation'], 3);
   _OCG_DuelQueryField = Module['_OCG_DuelQueryField'] = createExportWrapper('OCG_DuelQueryField', wasmExports['OCG_DuelQueryField'], 2);
+  _web_create_duel = Module['_web_create_duel'] = createExportWrapper('web_create_duel', wasmExports['web_create_duel'], 11);
+  _web_last_create_status = Module['_web_last_create_status'] = createExportWrapper('web_last_create_status', wasmExports['web_last_create_status'], 0);
+  _web_start_duel = Module['_web_start_duel'] = createExportWrapper('web_start_duel', wasmExports['web_start_duel'], 1);
+  _web_process = Module['_web_process'] = createExportWrapper('web_process', wasmExports['web_process'], 1);
+  _web_get_message = Module['_web_get_message'] = createExportWrapper('web_get_message', wasmExports['web_get_message'], 1);
+  _web_msg_length = Module['_web_msg_length'] = createExportWrapper('web_msg_length', wasmExports['web_msg_length'], 0);
+  _web_set_response_int = Module['_web_set_response_int'] = createExportWrapper('web_set_response_int', wasmExports['web_set_response_int'], 2);
+  _web_set_response_buf = Module['_web_set_response_buf'] = createExportWrapper('web_set_response_buf', wasmExports['web_set_response_buf'], 3);
+  _web_destroy_duel = Module['_web_destroy_duel'] = createExportWrapper('web_destroy_duel', wasmExports['web_destroy_duel'], 1);
+  _web_new_card = Module['_web_new_card'] = createExportWrapper('web_new_card', wasmExports['web_new_card'], 8);
+  _web_load_script = Module['_web_load_script'] = createExportWrapper('web_load_script', wasmExports['web_load_script'], 4);
+  _web_get_version = Module['_web_get_version'] = createExportWrapper('web_get_version', wasmExports['web_get_version'], 2);
   _free = Module['_free'] = createExportWrapper('free', wasmExports['free'], 1);
   _fflush = createExportWrapper('fflush', wasmExports['fflush'], 1);
   _malloc = Module['_malloc'] = createExportWrapper('malloc', wasmExports['malloc'], 1);
@@ -1867,7 +1987,10 @@ function assignWasmExports(wasmExports) {
   __emscripten_stack_restore = wasmExports['_emscripten_stack_restore'];
   __emscripten_stack_alloc = wasmExports['_emscripten_stack_alloc'];
   _emscripten_stack_get_current = wasmExports['emscripten_stack_get_current'];
+  ___cxa_increment_exception_refcount = createExportWrapper('__cxa_increment_exception_refcount', wasmExports['__cxa_increment_exception_refcount'], 1);
   ___cxa_decrement_exception_refcount = createExportWrapper('__cxa_decrement_exception_refcount', wasmExports['__cxa_decrement_exception_refcount'], 1);
+  ___get_exception_message = createExportWrapper('__get_exception_message', wasmExports['__get_exception_message'], 3);
+  ___cxa_can_catch = createExportWrapper('__cxa_can_catch', wasmExports['__cxa_can_catch'], 3);
   ___cxa_get_exception_ptr = createExportWrapper('__cxa_get_exception_ptr', wasmExports['__cxa_get_exception_ptr'], 1);
   memory = wasmMemory = wasmExports['memory'];
   __indirect_function_table = wasmTable = wasmExports['__indirect_function_table'];
@@ -1881,9 +2004,13 @@ var wasmImports = {
   /** @export */
   __cxa_end_catch: ___cxa_end_catch,
   /** @export */
+  __cxa_find_matching_catch_2: ___cxa_find_matching_catch_2,
+  /** @export */
   __cxa_find_matching_catch_3: ___cxa_find_matching_catch_3,
   /** @export */
   __cxa_throw: ___cxa_throw,
+  /** @export */
+  __resumeException: ___resumeException,
   /** @export */
   __syscall_dup3: ___syscall_dup3,
   /** @export */
@@ -1911,15 +2038,71 @@ var wasmImports = {
   /** @export */
   fd_write: _fd_write,
   /** @export */
+  invoke_diii,
+  /** @export */
+  invoke_i,
+  /** @export */
+  invoke_ii,
+  /** @export */
+  invoke_iii,
+  /** @export */
   invoke_iiii,
   /** @export */
   invoke_iiiii,
+  /** @export */
+  invoke_iiiiii,
+  /** @export */
+  invoke_iiiiiii,
+  /** @export */
+  invoke_iiiiiiii,
+  /** @export */
+  invoke_iiiiiiiii,
+  /** @export */
+  invoke_iiiiiiiiii,
+  /** @export */
+  invoke_iiiiiiiiiiiii,
+  /** @export */
+  invoke_iiiij,
+  /** @export */
+  invoke_iiiji,
+  /** @export */
+  invoke_iij,
+  /** @export */
+  invoke_jii,
+  /** @export */
+  invoke_jiii,
+  /** @export */
+  invoke_jiiii,
+  /** @export */
+  invoke_jiiji,
+  /** @export */
+  invoke_v,
   /** @export */
   invoke_vi,
   /** @export */
   invoke_vii,
   /** @export */
-  invoke_viii
+  invoke_viii,
+  /** @export */
+  invoke_viiii,
+  /** @export */
+  invoke_viiiii,
+  /** @export */
+  invoke_viiiiii,
+  /** @export */
+  invoke_viiiiiii,
+  /** @export */
+  invoke_viiiiiiii,
+  /** @export */
+  invoke_viiiiiiiii,
+  /** @export */
+  invoke_viiiiiiiiii,
+  /** @export */
+  invoke_viiiiiiiiiiii,
+  /** @export */
+  invoke_viiiji,
+  /** @export */
+  invoke_vij
 };
 
 function invoke_vii(index,a1,a2) {
@@ -1933,10 +2116,77 @@ function invoke_vii(index,a1,a2) {
   }
 }
 
+function invoke_viiii(index,a1,a2,a3,a4) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4);
+  } catch(e) {
+    stackRestore(sp);
+    if (!(e instanceof EmscriptenEH)) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_jiii(index,a1,a2,a3) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3);
+  } catch(e) {
+    stackRestore(sp);
+    if (!(e instanceof EmscriptenEH)) throw e;
+    _setThrew(1, 0);
+    return 0n;
+  }
+}
+
+function invoke_iii(index,a1,a2) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2);
+  } catch(e) {
+    stackRestore(sp);
+    if (!(e instanceof EmscriptenEH)) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_ii(index,a1) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1);
+  } catch(e) {
+    stackRestore(sp);
+    if (!(e instanceof EmscriptenEH)) throw e;
+    _setThrew(1, 0);
+  }
+}
+
 function invoke_iiii(index,a1,a2,a3) {
   var sp = stackSave();
   try {
     return getWasmTableEntry(index)(a1,a2,a3);
+  } catch(e) {
+    stackRestore(sp);
+    if (!(e instanceof EmscriptenEH)) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiji(index,a1,a2,a3,a4) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4);
+  } catch(e) {
+    stackRestore(sp);
+    if (!(e instanceof EmscriptenEH)) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiii(index,a1,a2,a3,a4,a5) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5);
   } catch(e) {
     stackRestore(sp);
     if (!(e instanceof EmscriptenEH)) throw e;
@@ -1974,6 +2224,251 @@ function invoke_iiiii(index,a1,a2,a3,a4) {
     stackRestore(sp);
     if (!(e instanceof EmscriptenEH)) throw e;
     _setThrew(1, 0);
+  }
+}
+
+function invoke_iij(index,a1,a2) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2);
+  } catch(e) {
+    stackRestore(sp);
+    if (!(e instanceof EmscriptenEH)) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9);
+  } catch(e) {
+    stackRestore(sp);
+    if (!(e instanceof EmscriptenEH)) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiiii(index,a1,a2,a3,a4,a5,a6) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6);
+  } catch(e) {
+    stackRestore(sp);
+    if (!(e instanceof EmscriptenEH)) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_jii(index,a1,a2) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2);
+  } catch(e) {
+    stackRestore(sp);
+    if (!(e instanceof EmscriptenEH)) throw e;
+    _setThrew(1, 0);
+    return 0n;
+  }
+}
+
+function invoke_iiiiii(index,a1,a2,a3,a4,a5) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5);
+  } catch(e) {
+    stackRestore(sp);
+    if (!(e instanceof EmscriptenEH)) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9);
+  } catch(e) {
+    stackRestore(sp);
+    if (!(e instanceof EmscriptenEH)) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8);
+  } catch(e) {
+    stackRestore(sp);
+    if (!(e instanceof EmscriptenEH)) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_v(index) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)();
+  } catch(e) {
+    stackRestore(sp);
+    if (!(e instanceof EmscriptenEH)) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8);
+  } catch(e) {
+    stackRestore(sp);
+    if (!(e instanceof EmscriptenEH)) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiiiiiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12);
+  } catch(e) {
+    stackRestore(sp);
+    if (!(e instanceof EmscriptenEH)) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiiiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10);
+  } catch(e) {
+    stackRestore(sp);
+    if (!(e instanceof EmscriptenEH)) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_i(index) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)();
+  } catch(e) {
+    stackRestore(sp);
+    if (!(e instanceof EmscriptenEH)) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiji(index,a1,a2,a3,a4,a5) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5);
+  } catch(e) {
+    stackRestore(sp);
+    if (!(e instanceof EmscriptenEH)) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_vij(index,a1,a2) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2);
+  } catch(e) {
+    stackRestore(sp);
+    if (!(e instanceof EmscriptenEH)) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_diii(index,a1,a2,a3) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3);
+  } catch(e) {
+    stackRestore(sp);
+    if (!(e instanceof EmscriptenEH)) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiiiii(index,a1,a2,a3,a4,a5,a6,a7) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7);
+  } catch(e) {
+    stackRestore(sp);
+    if (!(e instanceof EmscriptenEH)) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiij(index,a1,a2,a3,a4) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4);
+  } catch(e) {
+    stackRestore(sp);
+    if (!(e instanceof EmscriptenEH)) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiiiii(index,a1,a2,a3,a4,a5,a6,a7) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7);
+  } catch(e) {
+    stackRestore(sp);
+    if (!(e instanceof EmscriptenEH)) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiiii(index,a1,a2,a3,a4,a5,a6) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6);
+  } catch(e) {
+    stackRestore(sp);
+    if (!(e instanceof EmscriptenEH)) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_jiiii(index,a1,a2,a3,a4) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4);
+  } catch(e) {
+    stackRestore(sp);
+    if (!(e instanceof EmscriptenEH)) throw e;
+    _setThrew(1, 0);
+    return 0n;
+  }
+}
+
+function invoke_viiiiiiiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12);
+  } catch(e) {
+    stackRestore(sp);
+    if (!(e instanceof EmscriptenEH)) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_jiiji(index,a1,a2,a3,a4) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4);
+  } catch(e) {
+    stackRestore(sp);
+    if (!(e instanceof EmscriptenEH)) throw e;
+    _setThrew(1, 0);
+    return 0n;
   }
 }
 
