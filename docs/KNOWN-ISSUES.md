@@ -286,7 +286,10 @@ EDOPro 는 `configs.json` 의 `repos` 를 **libgit2** 로 clone/pull 해 카드 
 - **로컬 호스팅**: 브라우저는 TCP 서버를 열 수 없으므로 "방 만들기"는 실제로는 **멀티롤 서버에 접속**한다.
   봇은 NAS 패널(`POST /api/bot/start`)로 투입한다.
 - **WindBot**: 브라우저에서 실행 불가(위와 동일).
-- **사이드 덱 교환**: EDOPro/WindBot 구조상 미지원(기존 프로젝트와 동일).
+- **사이드 덱 교환**: **지원된다**(2026-11-17 소스 확인). `STOC_CHANGE_SIDE`(0x7) → 덱 편집기 `is_siding` 모드 →
+  `CTOS_UPDATE_DECK`(0x2) → 서버 검증(`GenericDuel::UpdateDeck` / 멀티롤 `Room/State/Sidedecking.cpp`) →
+  `STOC_WAITING_SIDE`(0x8) → 다음 판. 검증: main(스킬 제외)·extra 장수 동일 + **세 덱 전체 코드 멀티셋 동일**(재배치만).
+  **불가한 것은 WindBot 봇뿐**(`Executor` 에 `OnSide*` 콜백 없음 → 봇이 낀 3판 매치는 비대칭).
 
 ## 검증 체크리스트(변경 시)
 
