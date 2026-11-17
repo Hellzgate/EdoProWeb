@@ -11,7 +11,7 @@ import { LocalCore, SYSTEM_SCRIPTS, type LocalDeck } from '../core/LocalCore.ts'
 import { BoardRenderer } from '../render/BoardRenderer.ts';
 import { layoutField } from '../render/field.ts';
 import { drawBoard } from '../render/board.ts';
-import { onAssetLoad } from '../render/assets.ts';
+import { onAssetLoad, setFieldMat } from '../render/assets.ts';
 import { cardById, loadCards, toCardInfo, type Card } from '../data/carddb.ts';
 import { ScriptCache } from '../data/scripts.ts';
 import {
@@ -118,6 +118,12 @@ export class DuelScreen {
             <label class="tag"><input id="d-auto" type="checkbox" /> 내 턴도 자동</label>
             <button id="d-stop">중지</button>
             <button id="d-save" disabled>리플레이 저장</button>
+            <select id="d-mat" title="필드 매트">
+              <option value="field3">매트 3</option>
+              <option value="field">매트 1</option>
+              <option value="field2">매트 2</option>
+              <option value="field4">매트 4</option>
+            </select>
             <span class="tag" id="d-hint">카드 DB·스크립트 준비 중…</span>
           </div>
           <div id="d-stage">
@@ -200,6 +206,15 @@ export class DuelScreen {
     });
     this.$('d-stop').addEventListener('click', () => this.stop());
     this.$('d-save').addEventListener('click', () => this.saveReplay());
+    const mat = this.$<HTMLSelectElement>('d-mat');
+    const saved = localStorage.getItem('edopro.mat') ?? 'field3';
+    mat.value = saved;
+    setFieldMat(saved);
+    mat.addEventListener('change', () => {
+      setFieldMat(mat.value);
+      localStorage.setItem('edopro.mat', mat.value);
+      this.render();
+    });
     this.$<HTMLInputElement>('d-ydk').addEventListener('change', async (e) => {
       const f = (e.target as HTMLInputElement).files?.[0];
       if (!f) return;

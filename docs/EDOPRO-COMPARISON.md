@@ -12,7 +12,7 @@
 | 자산 | 원본 경로 | 우리 경로 | 상태 |
 |---|---|---|---|
 | 플레이매트 | `textures/field.png`, `field2..4.png`, `fieldSP*.png` (512×410) | `public/theme/field3.png` | ✅ 사용 (field3 고정) |
-| 매트 종류 선택 | 설정 → 필드 선택 | — | ❌ 없음 |
+| 매트 종류 선택 | 설정 → 필드 선택 | 툴바 **[매트 N]** (field/2/3/4, localStorage 저장) | ✅ |
 | 매트 투명판 | `field-transparent.png` 등 | — | ❌ 미사용 (커스텀 매트용) |
 | 카드 뒷면(덱) | `textures/cover2.png` (보라) | `public/theme/cover2.png` | ✅ |
 | 카드 뒷면(엑덱) | `textures/cover.png` (주황) | `public/theme/cover.png` | ✅ |

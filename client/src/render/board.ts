@@ -101,8 +101,22 @@ export function drawBoard(
     }
   }
 
-  /* 3.5) 카운터 배지 */
-  for (const key of Object.keys(s.counters ?? {})) {
+  /* 3.4) 체인 번호 — 카드 위에 1,2,3… */
+  s.chain.forEach((c, i) => {
+    const key = c.loc & 0x04 ? `m${c.ctrl & 1}-${c.seq}` : c.loc & 0x08 ? `s${c.ctrl & 1}-${c.seq}` : '';
+    const r = key ? layout.zones[key] : undefined;
+    if (!r) return;
+    const d = Math.max(12, r.w * 0.3);
+    roundRect(ctx, { x: r.x + 2, y: r.y + 2, w: d, h: d }, 3);
+    ctx.fillStyle = 'rgba(232,200,122,0.95)';
+    ctx.fill();
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#1a1408';
+    ctx.font = `700 ${Math.max(8, Math.round(d * 0.66))}px ui-monospace, Consolas, monospace`;
+    ctx.fillText(String(i + 1), r.x + 2 + d / 2, r.y + 2 + d / 2);
+  });
+
+  /* 3.5) 카운터 배지 */  for (const key of Object.keys(s.counters ?? {})) {
     const n = s.counters[key]!;
     if (!n) continue;
     const r = layout.zones[key];

@@ -66,7 +66,20 @@ function load(url: string): HTMLImageElement | null {
   return null;
 }
 
-export const fieldImage = (): HTMLImageElement | null => load('/theme/field3.png');
+/** 선택 가능한 매트(원본 EDOPro textures) */
+export const MATS = ['field', 'field2', 'field3', 'field4'] as const;
+let matFile = 'field3';
+
+export function setFieldMat(name: string): void {
+  if (!MATS.includes(name as (typeof MATS)[number])) return;
+  matFile = name;
+}
+
+export function currentFieldMat(): string {
+  return matFile;
+}
+
+export const fieldImage = (): HTMLImageElement | null => load(`/theme/${matFile}.png`);
 /** 엑스트라 덱 뒷면(주황) */
 export const extraBack = (): HTMLImageElement | null => load('/theme/cover.png');
 /** 메인 덱 뒷면(보라) */

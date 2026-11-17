@@ -49,6 +49,9 @@ export function phaseName(phase: number): string {
 export interface StackCard {
   code: number;
   ctrl: number;
+  /** 카드가 있던 존(loc_info) — 체인 번호를 카드 위에 그리기 위해 */
+  loc: number;
+  seq: number;
 }
 
 export interface DuelState {
@@ -309,7 +312,7 @@ export function applyPacket(s: DuelState, p: ReplayPacket): void {
     }
     case MSG.CHAINING: {
       // payload: u32 code, u8 controller, u8 location, u8 sequence, u8 position, u64 desc
-      s.chain.push({ code: readU32(d, 0), ctrl: readU8(d, 4) & 1 });
+      s.chain.push({ code: readU32(d, 0), ctrl: readU8(d, 4) & 1, loc: readU8(d, 5), seq: readU32(d, 6) });
       s.lastEvent = 'CHAIN ' + readU32(d, 0);
       break;
     }
