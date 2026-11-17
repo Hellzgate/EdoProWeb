@@ -94,11 +94,16 @@ python tools/patch-cards-meta.py                   # setcodes 등 주입
 
 | 항목 | 값 |
 |---|---|
-| 이미지 | `edopro-client:0.7.8` (0.6.0 → 0.7.8) |
-| 컨테이너 | `edopro-client` · `--restart unless-stopped` · **:7560** |
-| 데이터 | 볼륨 `/home/hellzsub/edopro-data` → `/data` (**root 소유** → 갱신은 docker 임시 컨테이너로) |
-| 데이터 갱신(로컬→서버) | `docker run --rm -v /home/hellzsub/edopro-data:/data -v ~/up.json:/src/x:ro alpine cp …` |
-| 빌드 | `scp dist → mini:~/edopro-client/dist` → `docker build -t edopro-client:X .` → `docker rm -f` → `docker run … -v ~/edopro-data:/data` |
+| 이미지 | `edopro-client:0.9.23` |
+| 컨테이너 | `edopro-client` · `--restart unless-stopped` · **:7556 + :7560** (같은 앱) |
+| 외부 접속 | **https://sw20103.synology.me:8451/** (Synology 역방향 프록시 → 192.168.0.53:7556) |
+| HTTPS 검증 | `isSecureContext=true` · 서비스워커 등록 · wasm 로드 · 듀얼 시작 · 콘솔 오류 0 |
+| 데이터 | 볼륨 `/home/hellzsub/edopro-data` → `/data` (**root 소유**, 갱신은 docker 임시 컨테이너) |
+| 구 클라이언트 | `edopro-web:1.25.5` **중지**(7556 양보). 되살릴 때는 7557 등 다른 포트 |
+| 빌드/배포 | `scp dist → mini:~/edopro-client/dist` → `docker build -t edopro-client:X .` → `docker rm -f` → `docker run -d --name edopro-client --restart unless-stopped -p 7556:80 -p 7560:80 -v ~/edopro-data:/data edopro-client:X` |
+
+> ⚠ 7556 을 다른 컨테이너가 점유하면 Synology 역방향 프록시(8451)가 새 클라이언트를 못 가리킨다.
+> 구 컨테이너 참고: 볼륨 `edopro_pics:/app/piccache` · `edopro_userdata:/app/userdata` · `/home/hellzsub/edopro-pics-local:/app/localpics:ro`, 포트 `7556:8080`·`8443:8443`
 
 ## 8. 다음 작업
 
