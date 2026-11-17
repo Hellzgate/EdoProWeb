@@ -6,6 +6,51 @@ import { phaseName, type DuelState } from '../engine/state.ts';
 import type { FieldLayout } from './field.ts';
 import { FONT, INK, roundRect } from './theme.ts';
 
+/** 페이즈 이름(한국어) */
+export const PHASE_KO: Record<string, string> = {
+  DRAW: '드로우 페이즈',
+  STANDBY: '스탠바이 페이즈',
+  MAIN1: '메인 페이즈 1',
+  BATTLE_START: '배틀 페이즈',
+  BATTLE_STEP: '배틀 스텝',
+  DAMAGE: '데미지 스텝',
+  DAMAGE_CAL: '데미지 계산',
+  BATTLE: '배틀',
+  MAIN2: '메인 페이즈 2',
+  END: '엔드 페이즈',
+};
+
+/** 화면 중앙 페이즈 배너 (EDOPro 와 같은 위치·느낌) */
+export function drawPhaseBanner(
+  ctx: CanvasRenderingContext2D,
+  vw: number,
+  vh: number,
+  text: string,
+  alpha: number,
+  cardW: number,
+): void {
+  if (!text || alpha <= 0.01) return;
+  const size = Math.max(22, Math.round(cardW * 0.75));
+  const cy = vh * 0.42;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.textAlign = 'center';
+  ctx.font = `600 ${size}px ${FONT.display}`;
+  const tw = ctx.measureText(text).width;
+  const padX = size * 0.35;
+  const bw = tw + padX * 2;
+  const bh = size * 1.5;
+  roundRect(ctx, { x: vw / 2 - bw / 2, y: cy - bh / 2, w: bw, h: bh }, bh / 2);
+  ctx.fillStyle = 'rgba(6,8,10,0.72)';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(232,200,122,0.55)';
+  ctx.lineWidth = 1.4;
+  ctx.stroke();
+  ctx.fillStyle = INK.cream;
+  ctx.fillText(text, vw / 2, cy);
+  ctx.restore();
+}
+
 export function drawHud(
   ctx: CanvasRenderingContext2D,
   vw: number,

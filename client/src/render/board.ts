@@ -14,12 +14,14 @@ import { cardById } from '../data/carddb.ts';
 import { deckBack, extraBack, fieldImage } from './assets.ts';
 import { drawCard, drawHand } from './cards.ts';
 import type { FieldLayout } from './field.ts';
-import { drawHud } from './hud.ts';
+import { drawHud, drawPhaseBanner } from './hud.ts';
 import { INK, roundRect } from './theme.ts';
 
 export interface BoardLabels {
   /** [나, 상대] */
   names?: string[];
+  /** 페이즈 배너(문구, 투명도) */
+  banner?: { text: string; alpha: number };
   /** 강조할 존 키(`m0-1`, `s1-0` …) — 선택 대상 */
   highlight?: string[];
   /** 존별 현재 값(공수/엑시즈 소재) — 엔진 조회 결과 */
@@ -202,4 +204,7 @@ export function drawBoard(
     labels.names?.[0] ?? '나',
     labels.names?.[1] ?? '상대',
   ]);
+  if (labels.banner) {
+    drawPhaseBanner(ctx, vw, vh, labels.banner.text, labels.banner.alpha, layout.cardW);
+  }
 }

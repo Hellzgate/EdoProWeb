@@ -11,6 +11,7 @@ import { LocalCore, SYSTEM_SCRIPTS, type LocalDeck } from '../core/LocalCore.ts'
 import { BoardRenderer } from '../render/BoardRenderer.ts';
 import { layoutField } from '../render/field.ts';
 import { drawBoard } from '../render/board.ts';
+import { PHASE_KO } from '../render/hud.ts';
 import { handRects } from '../render/cards.ts';
 import { onAssetLoad, setFieldMat } from '../render/assets.ts';
 import { playSfx, preloadSfx, setSfxEnabled, sfxEnabled } from './sfx.ts';
@@ -102,6 +103,10 @@ export class DuelScreen {
   private sortOrder: number[] = [];
   private layout: ReturnType<typeof layoutField> | null = null;
   private highlight: string[] = [];
+  /** 화면 중앙 페이즈 배너 */
+  private banner: { text: string; at: number } | null = null;
+  /** 직전 lastEvent(제자리 변경 대응) */
+  private lastEvt = '';
   /** 체인 모드 — on: 항상 묻기 / off: 자동 패스 / pause: 이번 턴만 자동 패스 */
   private chainMode: 'on' | 'off' | 'pause' = 'on';
   private pauseTurn = -1;
@@ -427,9 +432,11 @@ export class DuelScreen {
   private wire(): void {
     const core = this.core!;
     core.on('state', (st) => {
-      const prev = this.state?.lastEvent ?? '';
+      // ⚠ LocalCore 는 상태 객체를 **제자리에서** 바꾸므로, 비교용 값을 따로 보관해야 한다
+      const prev = this.lastEvt;
+      this.lastEvt = st.lastEvent;
       this.state = st;
-      if (st.lastEvent !== prev) this.soundFor(st.lastEvent);
+      if (this.lastEvt !== prev) this.soundFor(this.lastEvt);
       this.render();
     });
     core.on('need', (n) => this.onNeed(n.type, n.payload));
@@ -453,7 +460,12 @@ export class DuelScreen {
   private soundFor(ev: string): void {
     if (!ev) return;
     if (ev.startsWith('TURN')) return playSfx('nextturn');
-    if (ev.startsWith('PHASE')) return playSfx('phase');
+    if (ev.startsWith('PHASE')) {
+      const key = ev.slice(6).trim();
+      this.banner = { text: PHASE_KO[key] ?? key, at: performance.now() };
+      this.animateBanner();
+      return playSfx('phase');
+    }
     if (ev.startsWith('DRAW')) return playSfx('draw');
     if (ev.startsWith('SUMMON') || ev.startsWith('SPSUMMON')) return playSfx('set');
     if (ev.startsWith('SET')) return playSfx('set');
@@ -824,10 +836,31 @@ export class DuelScreen {
     const fx = this.fx;
     fx.save();
     fx.scale(dpr, dpr);
-    drawBoard(fx, w, h, layout, this.state, { names: ['나', '상대'], highlight: this.highlight, stats: this.core?.stats });
+    const banner = this.banner;
+    const alpha = banner ? Math.max(0, 1 - (performance.now() - banner.at) / 1400) : 0;
+    drawBoard(fx, w, h, layout, this.state, {
+      names: ['나', '상대'],
+      highlight: this.highlight,
+      stats: this.core?.stats,
+      banner: banner && alpha > 0 ? { text: banner.text, alpha } : undefined,
+    });
     fx.restore();
 
     this.renderStatus();
+  }
+
+  /** 배너 페이드아웃 애니메이션 */
+  private animateBanner(): void {
+    const step = () => {
+      if (!this.banner) return;
+      this.render();
+      if (performance.now() - this.banner.at < 1450) requestAnimationFrame(step);
+      else {
+        this.banner = null;
+        this.render();
+      }
+    };
+    requestAnimationFrame(step);
   }
 
   private renderStatus(): void {
