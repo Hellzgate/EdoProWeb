@@ -79,13 +79,13 @@ export function drawBoard(
       if (code === null) continue;
       if (i >= 5 && side === 1 && s.mzone[0][i] !== null) continue; // EMZ 공유
       const r = layout.zones[`m${side}-${i}`];
-      if (r) drawCard(ctx, r, code, true, null);
+      if (r) drawCard(ctx, r, code, true, null, s.mpos[side]?.[i] ?? 0);
     }
     for (let i = 0; i < 6; i++) {
       const code = s.szone[side][i];
       if (code === null) continue;
       const r = layout.zones[`s${side}-${i}`];
-      if (r) drawCard(ctx, r, code, side === 0, deckImg);
+      if (r) drawCard(ctx, r, code, side === 0, deckImg, s.spos[side]?.[i] ?? 0);
     }
   }
 

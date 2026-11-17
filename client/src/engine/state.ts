@@ -64,6 +64,10 @@ export interface DuelState {
   turn: number;
   activePlayer: number;
   phase: number;
+  /** 몬스터 존 표시형식(0x1 공격 / 0x4·0x8 수비 / null=없음) */
+  mpos: Array<Array<number | null>>;
+  /** 마함 존 표시형식 */
+  spos: Array<Array<number | null>>;
   chain: StackCard[];
   winner: number | null;
   winReason: number | null;
@@ -87,6 +91,8 @@ export function createState(): DuelState {
     turn: 0,
     activePlayer: 0,
     phase: 0,
+    mpos: [empty(7), empty(7)],
+    spos: [empty(6), empty(6)],
     chain: [],
     winner: null,
     winReason: null,
@@ -187,22 +193,37 @@ export function applyPacket(s: DuelState, p: ReplayPacket): void {
     }
     case MSG.MOVE:
     case MSG.SET: {
-      // 실측 레이아웃(28B): u32 code · u8 fCtrl · u8 fLoc · u32 fSeq · u32 fPos ·
-      //                     u8 tCtrl · u8 tLoc · u32 tSeq · u32 tPos · …
+      // 실측: u32 code · loc_info(from, 10B) · loc_info(to, 10B) = 24B
+      //   SET 은 **loc_info 1개**(code + 위치) — MOVE 처럼 2개가 아니다.
       const code = readU32(d, 0);
       const fCtrl = readU8(d, 4) & 1;
       const fLoc = readU8(d, 5);
       const fSeq = readU32(d, 6);
+      if (p.message === MSG.SET) {
+        const tCtrl = fCtrl;
+        const tLoc = fLoc;
+        const tSeq = fSeq;
+        addTo(s, tCtrl, tLoc, tSeq, code);
+        if (tLoc & LOC.MZONE && tSeq < 7) s.mpos[tCtrl]![tSeq] = 0x8; // 세트 = 뒷면 수비
+        if (tLoc & LOC.SZONE && tSeq < 6) s.spos[tCtrl]![tSeq] = 0x8;
+        s.lastEvent = 'SET ' + code;
+        break;
+      }
       const tCtrl = readU8(d, 14) & 1;
       const tLoc = readU8(d, 15);
       const tSeq = readU32(d, 16);
+      const tPos = readU32(d, 20);
       removeFrom(s, fCtrl, fLoc, fSeq, code);
       addTo(s, tCtrl, tLoc, tSeq, code);
       if (fLoc & LOC.DECK) s.deck[fCtrl] = Math.max(0, s.deck[fCtrl] - 1);
       if (fLoc & LOC.EXTRA) s.extra[fCtrl] = Math.max(0, s.extra[fCtrl] - 1);
       if (tLoc & LOC.DECK) s.deck[tCtrl]++;
       if (tLoc & LOC.EXTRA) s.extra[tCtrl]++;
-      s.lastEvent = (p.message === MSG.SET ? 'SET ' : 'MOVE ') + code;
+      if (tLoc & LOC.MZONE && tSeq < 7) s.mpos[tCtrl]![tSeq] = tPos;
+      if (tLoc & LOC.SZONE && tSeq < 6) s.spos[tCtrl]![tSeq] = tPos;
+      if (fLoc & LOC.MZONE && fSeq < 7) s.mpos[fCtrl]![fSeq] = null;
+      if (fLoc & LOC.SZONE && fSeq < 6) s.spos[fCtrl]![fSeq] = null;
+      s.lastEvent = 'MOVE ' + code;
       break;
     }
     case MSG.SUMMONING:
@@ -212,8 +233,12 @@ export function applyPacket(s: DuelState, p: ReplayPacket): void {
       const ctrl = readU8(d, 4) & 1;
       const loc = readU8(d, 5);
       const seq = readU32(d, 6);
+      const pos = readU32(d, 10);
       if (loc & LOC.MZONE) {
-        if (seq < s.mzone[ctrl].length) s.mzone[ctrl][seq] = code;
+        if (seq < s.mzone[ctrl].length) {
+          s.mzone[ctrl][seq] = code;
+          s.mpos[ctrl]![seq] = pos;
+        }
       } else if (loc & LOC.SZONE) {
         if (seq < s.szone[ctrl].length) s.szone[ctrl][seq] = code;
       }

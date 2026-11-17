@@ -7,17 +7,30 @@ import { cardImage } from './assets.ts';
 import type { FieldLayout } from './field.ts';
 import { ellipsis, roundRect, type Rect } from './theme.ts';
 
-/** 카드 1장 */
+/** 카드 1장 — position 의 수비(0x4)/세트(0x8)면 90° 회전, 세트는 뒷면 */
 export function drawCard(
   ctx: CanvasRenderingContext2D,
   r: Rect,
   code: number,
   faceUp: boolean,
   back: HTMLImageElement | null,
+  position = 0,
 ): void {
-  const img = faceUp ? cardImage(code) : back;
+  const set = (position & 0x8) !== 0;
+  const defense = (position & 0x4) !== 0 || set;
+  const shown = faceUp && !set;
+  const img = shown ? cardImage(code) : back;
   if (img) {
-    ctx.drawImage(img, r.x, r.y, r.w, r.h);
+    if (defense) {
+      // 수비 표시: 카드를 눕힌다
+      ctx.save();
+      ctx.translate(r.x + r.w / 2, r.y + r.h / 2);
+      ctx.rotate(Math.PI / 2);
+      ctx.drawImage(img, -r.h / 2, -r.w / 2, r.h, r.w);
+      ctx.restore();
+    } else {
+      ctx.drawImage(img, r.x, r.y, r.w, r.h);
+    }
     roundRect(ctx, r, 3);
     ctx.strokeStyle = 'rgba(0,0,0,0.55)';
     ctx.lineWidth = 1;
@@ -28,7 +41,7 @@ export function drawCard(
   const card = cardById(code);
   const type = card?.type ?? 0;
   roundRect(ctx, r, 3);
-  ctx.fillStyle = !faceUp
+  ctx.fillStyle = !shown
     ? 'rgba(58,40,74,0.95)'
     : type & 0x2
       ? 'rgba(44,84,62,0.95)'
@@ -41,7 +54,7 @@ export function drawCard(
   ctx.stroke();
 
   ctx.textAlign = 'center';
-  if (!faceUp) {
+  if (!shown) {
     const cx = r.x + r.w / 2;
     const cy = r.y + r.h / 2;
     const sz = Math.min(r.w, r.h) * 0.2;
