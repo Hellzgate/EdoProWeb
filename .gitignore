@@ -17,3 +17,6 @@ __pycache__/
 .idea/
 *.bak
 *.log
+
+# 생성 데이터 (tools/sync-data.py 로 재생성)
+client/public/data/
