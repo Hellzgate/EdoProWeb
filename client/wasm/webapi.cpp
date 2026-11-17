@@ -119,6 +119,26 @@ void web_get_version(int* major, int* minor) { OCG_GetVersion(major, minor); }
  *   out[0]=atk, out[1]=def, out[2]=overlay 수, out[3]=counter 총 수
  *   반환: 0 성공, -1 실패(공개 정보 아님/없음)
  */
+/** 디버그: 원시 응답 버퍼를 그대로 복사한다(레이아웃 조사용). 반환 = 실제 길이 */
+int web_query_raw(OCG_Duel duel, int ctrl, int loc, int seq, unsigned int flags,
+                  unsigned char* buf, int maxlen)
+{
+    if (!duel || !buf) return -1;
+    OCG_QueryInfo info;
+    std::memset(&info, 0, sizeof(info));
+    info.flags = flags;
+    info.con = static_cast<uint8_t>(ctrl);
+    info.loc = static_cast<uint32_t>(loc);
+    info.seq = static_cast<uint32_t>(seq);
+    uint32_t len = 0;
+    unsigned char* p = reinterpret_cast<unsigned char*>(OCG_DuelQuery(duel, &len, &info));
+    if (!p) return -1;
+    int n = static_cast<int>(len);
+    if (n > maxlen) n = maxlen;
+    std::memcpy(buf, p, static_cast<size_t>(n));
+    return n;
+}
+
 int web_query_card(OCG_Duel duel, int ctrl, int loc, int seq, unsigned int* out)
 {
     if (!duel || !out) return -1;
@@ -139,12 +159,23 @@ int web_query_card(OCG_Duel duel, int ctrl, int loc, int seq, unsigned int* out)
     int atk = 0, def = 0;
     unsigned int overlays = 0;
 
-    // QUERY_ATTACK — 응답: [u32 flags][i32 atk]
-    if ((p = query(0x100u, p, &len)) && len >= 8) std::memcpy(&atk, p + 4, 4);
-    // QUERY_DEFENSE
-    if ((p = query(0x200u, p, &len)) && len >= 8) std::memcpy(&def, p + 4, 4);
-    // QUERY_OVERLAY_CARD — 응답: [u32 flags][u32 count][u32 ids...]
-    if ((p = query(0x10000u, p, &len)) && len >= 8) std::memcpy(&overlays, p + 4, 4);
+    // 응답 레이아웃(실측): [u16 블록길이][u32 flags][값…]  → 값은 offset 6
+    auto fetch = [&](unsigned int flags, unsigned int* out) -> bool {
+        p = query(flags, p, &len);
+        if (!p || len < 10) return false;
+        unsigned short blk = 0;
+        unsigned int got = 0;
+        std::memcpy(&blk, p, 2);
+        std::memcpy(&got, p + 2, 4);
+        if (got != flags) return false;
+        std::memcpy(out, p + 6, 4);
+        return true;
+    };
+
+    unsigned int v = 0;
+    if (fetch(0x100u, &v)) atk = static_cast<int>(v);      // ATTACK
+    if (fetch(0x200u, &v)) def = static_cast<int>(v);      // DEFENSE
+    if (fetch(0x10000u, &v)) overlays = v;                 // OVERLAY_CARD count
 
     if (overlays > 100) overlays = 0;      // 방어: 비정상 값 무시
     if (atk > 1000000 || atk < -1000000) atk = 0;

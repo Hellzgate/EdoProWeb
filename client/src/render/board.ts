@@ -165,9 +165,7 @@ export function drawBoard(
       : s.szone[Number(key[1])]?.[Number(key.split('-')[1])];
     const base = code === null || code === undefined ? undefined : cardById(code);
     const isMonster = key[0] === 'm';
-    // ⚠ 이 ocgcore 빌드에서 OCG_DuelQuery 가 0 을 돌려주는 경우가 있어(원인 조사 필요)
-    //    atk/def 가 모두 0 이면 표시하지 않는다(잘못된 값 노출 방지)
-    if (st.atk === 0 && st.def === 0) continue;
+    // 값이 기본값과 다를 때만 배지를 그린다(원본과 같은 표시 방식)
     if (isMonster && base && (st.atk !== base.atk || st.def !== base.def)) {
       const txt = `${st.atk}/${st.def}`;
       const fs = Math.max(8, Math.round(r.w * 0.16));

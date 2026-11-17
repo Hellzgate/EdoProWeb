@@ -1881,6 +1881,7 @@ var _web_destroy_duel = Module['_web_destroy_duel'] = makeInvalidEarlyAccess('_w
 var _web_new_card = Module['_web_new_card'] = makeInvalidEarlyAccess('_web_new_card');
 var _web_load_script = Module['_web_load_script'] = makeInvalidEarlyAccess('_web_load_script');
 var _web_get_version = Module['_web_get_version'] = makeInvalidEarlyAccess('_web_get_version');
+var _web_query_raw = Module['_web_query_raw'] = makeInvalidEarlyAccess('_web_query_raw');
 var _web_query_card = Module['_web_query_card'] = makeInvalidEarlyAccess('_web_query_card');
 var _free = Module['_free'] = makeInvalidEarlyAccess('_free');
 var _fflush = makeInvalidEarlyAccess('_fflush');
@@ -1931,6 +1932,7 @@ function assignWasmExports(wasmExports) {
   assert(typeof wasmExports['web_new_card'] !== 'undefined', 'missing Wasm export: web_new_card');
   assert(typeof wasmExports['web_load_script'] !== 'undefined', 'missing Wasm export: web_load_script');
   assert(typeof wasmExports['web_get_version'] !== 'undefined', 'missing Wasm export: web_get_version');
+  assert(typeof wasmExports['web_query_raw'] !== 'undefined', 'missing Wasm export: web_query_raw');
   assert(typeof wasmExports['web_query_card'] !== 'undefined', 'missing Wasm export: web_query_card');
   assert(typeof wasmExports['free'] !== 'undefined', 'missing Wasm export: free');
   assert(typeof wasmExports['fflush'] !== 'undefined', 'missing Wasm export: fflush');
@@ -1977,6 +1979,7 @@ function assignWasmExports(wasmExports) {
   _web_new_card = Module['_web_new_card'] = createExportWrapper('web_new_card', wasmExports['web_new_card'], 8);
   _web_load_script = Module['_web_load_script'] = createExportWrapper('web_load_script', wasmExports['web_load_script'], 4);
   _web_get_version = Module['_web_get_version'] = createExportWrapper('web_get_version', wasmExports['web_get_version'], 2);
+  _web_query_raw = Module['_web_query_raw'] = createExportWrapper('web_query_raw', wasmExports['web_query_raw'], 7);
   _web_query_card = Module['_web_query_card'] = createExportWrapper('web_query_card', wasmExports['web_query_card'], 5);
   _free = Module['_free'] = createExportWrapper('free', wasmExports['free'], 1);
   _fflush = createExportWrapper('fflush', wasmExports['fflush'], 1);
