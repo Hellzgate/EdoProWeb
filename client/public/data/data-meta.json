@@ -1,0 +1,70 @@
+{
+ "built": "2026-11-17 15:30:46",
+ "repos": [
+  {
+   "url": "https://github.com/ProjectIgnis/DeltaBagooska",
+   "repo_name": "최신 카드 업데이트",
+   "repo_path": "delta-bagooska",
+   "head": "21ed6b6f289b2068d6f6a782119e34636b760b91",
+   "tag": "delta-bagooska"
+  },
+  {
+   "url": "https://github.com/ProjectIgnis/LFLists",
+   "repo_name": "리미트 레귤레이션 업데이트",
+   "repo_path": "lflists",
+   "head": "336ec7e282c3a6e8c0b621108a050fdeb98ababc",
+   "tag": "lflists"
+  },
+  {
+   "url": "https://github.com/ProjectIgnis/Puzzles",
+   "repo_name": "퍼즐 듀얼 모음집",
+   "repo_path": "puzzles",
+   "head": "1177a180dd237da7f9703c846d533c2116ca1439",
+   "tag": "puzzles"
+  },
+  {
+   "url": "https://github.com/Team-AllYGOPro/edopro-korean",
+   "repo_name": "한국어 패치",
+   "repo_path": "languages/한국어",
+   "head": "5f0287025f1e824164c95f87d0b3a5b62bbdf1d2",
+   "tag": "languages_한국어"
+  },
+  {
+   "url": "https://github.com/Team-AllYGOPro/edopro-korean-delta",
+   "repo_name": "한국어 패치 업데이트",
+   "repo_path": "languages/한국어-1",
+   "head": "7db9754045792a1735b36969fb00d1de2dc44d40",
+   "tag": "languages_한국어-1"
+  },
+  {
+   "url": "https://github.com/CCC-Server/EMP-TY",
+   "repo_name": "커스텀 한국어 패치",
+   "repo_path": "languages/한국어-2",
+   "head": "7b5b05b531a42755b276c397bae8c4c46c764d5a",
+   "tag": "languages_한국어-2"
+  },
+  {
+   "url": "https://github.com/Hellzgate/EdoKroCDB",
+   "repo_name": "한국어 패치(Hellz)",
+   "repo_path": "languages/한국어-3",
+   "head": "44626f1953d58f7cbdab9756f08629a45d5663f9",
+   "tag": "languages_한국어-3"
+  },
+  {
+   "url": "https://github.com/CCC-Server/EMP-TY",
+   "repo_name": "커스텀 확장팩",
+   "repo_path": "expansions-2",
+   "head": "7b5b05b531a42755b276c397bae8c4c46c764d5a",
+   "tag": "expansions-2"
+  }
+ ],
+ "counts": {
+  "cards": 22654,
+  "unnamed": 169,
+  "script": 4974,
+  "lflist": 8,
+  "puzzle": 459,
+  "cdb": 43,
+  "skipped": 0
+ }
+}

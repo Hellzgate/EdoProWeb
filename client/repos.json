@@ -1,0 +1,151 @@
+{
+ "_note": "EDOPro config/configs.json + user_configs.json 의 repos/urls/servers 를 그대로 옮긴 것. should_read=false 는 건너뛰고, should_update=false 는 캐시만 사용한다.",
+ "repos": [
+  {
+   "url": "https://github.com/ProjectIgnis/DeltaBagooska",
+   "repo_name": "최신 카드 업데이트",
+   "repo_path": "delta-bagooska",
+   "data_path": "",
+   "script_path": "script",
+   "should_update": true,
+   "should_read": true,
+   "enabled": true
+  },
+  {
+   "url": "https://github.com/ProjectIgnis/LFLists",
+   "repo_name": "리미트 레귤레이션 업데이트",
+   "repo_path": "lflists",
+   "lflist_path": ".",
+   "should_update": true,
+   "should_read": true,
+   "enabled": true
+  },
+  {
+   "url": "https://github.com/ProjectIgnis/Puzzles",
+   "repo_name": "퍼즐 듀얼 모음집",
+   "repo_path": "puzzles",
+   "should_update": true,
+   "should_read": true,
+   "enabled": true
+  },
+  {
+   "url": "https://github.com/Team-AllYGOPro/edopro-korean",
+   "repo_name": "한국어 패치",
+   "repo_path": "languages/한국어",
+   "is_language": true,
+   "language": "한국어",
+   "should_update": true,
+   "should_read": true,
+   "enabled": true
+  },
+  {
+   "url": "https://github.com/Team-AllYGOPro/edopro-korean-delta",
+   "repo_name": "한국어 패치 업데이트",
+   "repo_path": "languages/한국어-1",
+   "is_language": true,
+   "language": "한국어",
+   "should_update": true,
+   "should_read": true,
+   "enabled": true
+  },
+  {
+   "url": "https://github.com/CCC-Server/EMP-TY",
+   "repo_name": "커스텀 한국어 패치",
+   "repo_path": "languages/한국어-2",
+   "is_language": true,
+   "language": "한국어",
+   "should_update": false,
+   "should_read": true,
+   "enabled": true
+  },
+  {
+   "url": "https://github.com/Hellzgate/EdoKroCDB",
+   "repo_name": "한국어 패치(Hellz)",
+   "repo_path": "languages/한국어-3",
+   "is_language": true,
+   "language": "한국어",
+   "should_update": true,
+   "should_read": true,
+   "enabled": true
+  },
+  {
+   "url": "https://github.com/CCC-Server/EMP-TY",
+   "repo_name": "커스텀 확장팩",
+   "repo_path": "expansions-2",
+   "data_path": "",
+   "pics_path": "pics",
+   "script_path": "script",
+   "should_update": false,
+   "should_read": true,
+   "enabled": true
+  }
+ ],
+ "urls": [
+  {
+   "url": "default",
+   "type": "pic"
+  },
+  {
+   "url": "default",
+   "type": "field"
+  },
+  {
+   "url": "default",
+   "type": "cover"
+  },
+  {
+   "url": "https://raw.githubusercontent.com/CCC-Server/EMP-TY/main/pics/field/{}.png",
+   "type": "field"
+  }
+ ],
+ "servers": [
+  {
+   "name": "Hellzmain",
+   "address": "sw20103.synology.me",
+   "duelport": 7914,
+   "roomaddress": "sw20103.synology.me",
+   "roomlistprotocol": "http",
+   "roomlistport": 7922
+  },
+  {
+   "name": "중부 유럽 (캐주얼)",
+   "address": "eu.projectignis.org",
+   "duelport": 7912,
+   "roomaddress": "eu.projectignis.org",
+   "roomlistprotocol": "http",
+   "roomlistport": 7923
+  },
+  {
+   "name": "중부 유럽 (경쟁전)",
+   "address": "eu.projectignis.org",
+   "duelport": 7911,
+   "roomaddress": "eu.projectignis.org",
+   "roomlistprotocol": "http",
+   "roomlistport": 7922
+  },
+  {
+   "name": "미국 서부 (캐주얼)",
+   "address": "us.projectignis.org",
+   "duelport": 7911,
+   "roomaddress": "us.projectignis.org",
+   "roomlistprotocol": "http",
+   "roomlistport": 7922
+  },
+  {
+   "name": "미국 서부 (경쟁전)",
+   "address": "us.projectignis.org",
+   "duelport": 7912,
+   "roomaddress": "us.projectignis.org",
+   "roomlistprotocol": "http",
+   "roomlistport": 7923
+  },
+  {
+   "name": "중국 남부 (캐주얼/경쟁전)",
+   "address": "ignis-duel.ygopro.cn",
+   "duelport": 44444,
+   "roomaddress": "ignis-room.ygopro.cn",
+   "roomlistprotocol": "https",
+   "roomlistport": 443
+  }
+ ]
+}

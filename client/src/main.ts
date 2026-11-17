@@ -1,11 +1,12 @@
 /**
- * P1 뷰어 — ICore(ReplayCore) + WebGL2 2.5D 보드 + 2D 텍스트 오버레이.
- * P0의 상태기계를 그대로 쓰고, 렌더/코어 경계를 ICore 로 분리했다.
+ * 뷰어 — ICore(ReplayCore) + WebGL2 필드(표준 배치) + 2D 텍스트 오버레이 + 덱 편집 탭.
+ * 필드 좌표는 render/field.ts 가 단일 소스(docs/YGO-FIELD-LAYOUT.md).
  */
 import { parseYrpx, type ReplayPacket } from './engine/yrpx.ts';
 import { PHASE_NAMES, type DuelState } from './engine/state.ts';
 import { ReplayCore } from './core/ReplayCore.ts';
-import { BoardRenderer, type Quad } from './render/BoardRenderer.ts';
+import { BoardRenderer } from './render/BoardRenderer.ts';
+import { layoutField, paintState } from './render/field.ts';
 import { DeckEditor } from './ui/DeckEditor.ts';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -24,22 +25,6 @@ function b64ToU8(s: string): Uint8Array {
   return out;
 }
 
-function fromJson(j: ReplayJson): { names: string[]; packets: ReplayPacket[] } {
-  return {
-    names: j.names,
-    packets: j.packets.map(([m, b]) => ({ message: m, data: b64ToU8(b) })),
-  };
-}
-
-/* ---------- 레이아웃 ---------- */
-const C = {
-  card: 62,
-  cardH: 88,
-  gap: 8,
-  pad: 28,
-  rowGap: 10,
-};
-
 let gl: BoardRenderer;
 let fx: CanvasRenderingContext2D;
 let core: ReplayCore | null = null;
@@ -49,165 +34,128 @@ let fileName = '';
 let timer: number | null = null;
 let speed = 20;
 
-function boardSize(): { w: number; h: number } {
-  const host = $('stage');
-  const w = Math.max(360, host.clientWidth);
-  return { w, h: 560 };
+function stageSize(): { w: number; h: number } {
+  const w = Math.max(380, $('stage').clientWidth);
+  return { w, h: Math.round(Math.min(620, Math.max(420, w * 0.52))) };
 }
 
 function setup(): void {
-  const glCanvas = $<HTMLCanvasElement>('gl');
-  const fxCanvas = $<HTMLCanvasElement>('fx');
-  gl = new BoardRenderer(glCanvas);
-  fx = fxCanvas.getContext('2d')!;
-  resize();
+  gl = new BoardRenderer($<HTMLCanvasElement>('gl'));
+  fx = $<HTMLCanvasElement>('fx').getContext('2d')!;
   window.addEventListener('resize', resize);
-  gl.draw([]);
+  resize();
 }
 
 function resize(): void {
-  const { w, h } = boardSize();
+  const { w, h } = stageSize();
   $('stage').style.height = h + 'px';
-  const glCanvas = $<HTMLCanvasElement>('gl');
-  const fxCanvas = $<HTMLCanvasElement>('fx');
   gl.resize(w, h);
   const dpr = Math.min(2, window.devicePixelRatio || 1);
-  fxCanvas.width = Math.round(w * dpr);
-  fxCanvas.height = Math.round(h * dpr);
-  fxCanvas.style.width = w + 'px';
-  fxCanvas.style.height = h + 'px';
+  const c = $<HTMLCanvasElement>('fx');
+  c.width = Math.round(w * dpr);
+  c.height = Math.round(h * dpr);
+  c.style.width = w + 'px';
+  c.style.height = h + 'px';
   draw();
 }
 
-function zoneQuads(w: number, h: number): { quads: Quad[]; rects: Record<string, { x: number; y: number; w: number; h: number }> } {
-  const quads: Quad[] = [];
-  const rects: Record<string, { x: number; y: number; w: number; h: number }> = {};
-  const cw = C.card;
-  const ch = C.cardH;
-  const gap = C.gap;
-  const fieldW = cw * 5 + gap * 4;
-  const left = (w - fieldW) / 2;
-
-  // 존: 상대(위, depth 1) / 나(아래, depth 0)
-  const rows: Array<{ side: number; top: number; depth: number }> = [
-    { side: 1, top: C.pad + 44, depth: 1 },
-    { side: 0, top: h - C.pad - ch * 2 - gap - 20, depth: 0 },
-  ];
-
-  for (const r of rows) {
-    for (let i = 0; i < 5; i++) {
-      const x = left + i * (cw + gap);
-      const y = r.top;
-      const key = `m${r.side}-${i}`;
-      rects[key] = { x, y, w: cw, h: ch };
-      quads.push({ ...rects[key]!, depth: r.depth, color: [0.075, 0.125, 0.165] });
-      const sy = y + ch + 6;
-      const skey = `s${r.side}-${i}`;
-      rects[skey] = { x, y: sy, w: cw, h: ch };
-      quads.push({ ...rects[skey]!, depth: r.depth, color: [0.055, 0.09, 0.12] });
-    }
-  }
-  return { quads, rects };
-}
-
 function draw(): void {
-  if (!fx || !state) return;
-  const { w, h } = boardSize();
-  const { quads, rects } = zoneQuads(w, h);
+  if (!fx) return;
+  const { w, h } = stageSize();
+  const layout = layoutField(w, h);
+  gl.draw(state ? paintState(layout, state) : layout.quads);
 
-  // 카드가 있으면 색을 밝힌다
-  const paint = (key: string, filled: boolean, faceDown: boolean) => {
-    const r = rects[key];
-    if (!r) return;
-    const depth = key.startsWith('m1') || key.startsWith('s1') ? 1 : 0;
-    quads.push({
-      x: r.x,
-      y: r.y,
-      w: r.w,
-      h: r.h,
-      depth,
-      color: filled ? (faceDown ? [0.15, 0.22, 0.33] : [0.19, 0.31, 0.47]) : [0.045, 0.07, 0.09],
-    });
-  };
-  for (let side = 0; side <= 1; side++) {
-    for (let i = 0; i < 5; i++) {
-      const m = state.mzone[side][i];
-      const s = state.szone[side][i];
-      paint(`m${side}-${i}`, m !== null, false);
-      paint(`s${side}-${i}`, s !== null, true);
-    }
-  }
-  gl.draw(quads);
-
-  // 텍스트 오버레이
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   fx.save();
   fx.scale(dpr, dpr);
   fx.clearRect(0, 0, w, h);
-
-  fx.font = '600 13px system-ui, "Malgun Gothic", sans-serif';
+  fx.font = '600 12.5px system-ui, "Malgun Gothic", sans-serif';
   fx.textBaseline = 'middle';
 
-  const head = (side: number, y: number, align: 'top' | 'bottom') => {
-    const label = side === 0 ? '나' : '상대';
-    const text = `${label}  ·  LP ${state!.lp[side]}   덱 ${state!.deck[side]}   엑스트라 ${state!.extra[side]}   패 ${state!.hand[side].length}   묘지 ${state!.grave[side].length}   제외 ${state!.banished[side].length}`;
-    fx.fillStyle = side === 0 ? 'rgba(220,235,255,0.92)' : 'rgba(200,215,235,0.78)';
-    fx.textAlign = 'left';
-    fx.fillText(text, C.pad, align === 'top' ? y : y);
-    if (side === 1 && names[1]) {
-      fx.fillStyle = 'rgba(140,160,190,0.8)';
-      fx.textAlign = 'right';
-      fx.fillText(names[1], w - C.pad, y);
-    }
-    if (side === 0 && names[0]) {
-      fx.fillStyle = 'rgba(140,160,190,0.8)';
-      fx.textAlign = 'right';
-      fx.fillText(names[0], w - C.pad, y);
-    }
+  const s = state;
+  const L = layout;
+
+  const label = (side: number, text: string, align: 'left' | 'right') => {
+    const p = L.piles[`deck-${side}`]!;
+    fx.fillStyle = side === 0 ? 'rgba(220,235,255,0.92)' : 'rgba(190,205,228,0.8)';
+    fx.textAlign = align;
+    const y = side === 0 ? p.y + L.cardH + 14 : p.y - 14;
+    fx.fillText(text, align === 'left' ? L.piles[`extra-${side}`]!.x : p.x + p.w, y);
   };
 
-  head(1, C.pad + 18, 'top');
-  head(0, h - C.pad - C.cardH * 2 - C.gap - 40, 'bottom');
-
-  // 카드 코드
-  fx.font = '9px ui-monospace, Consolas, monospace';
-  fx.textAlign = 'center';
-  for (let side = 0; side <= 1; side++) {
-    for (let i = 0; i < 5; i++) {
-      const m = state.mzone[side][i];
-      if (m !== null) {
-        const r = rects[`m${side}-${i}`]!;
-        fx.fillStyle = 'rgba(210,230,255,0.95)';
-        fx.fillText(String(m).slice(-6), r.x + r.w / 2, r.y + r.h / 2);
-      }
-      const s = state.szone[side][i];
-      if (s !== null) {
-        const r = rects[`s${side}-${i}`]!;
-        fx.fillStyle = 'rgba(150,180,220,0.8)';
-        fx.fillText('SET', r.x + r.w / 2, r.y + r.h / 2);
+  if (s) {
+    for (let side = 0; side <= 1; side++) {
+      label(
+        side,
+        `${side === 0 ? '나' : '상대'}  LP ${s.lp[side]} · 덱 ${s.deck[side]} · 엑덱 ${s.extra[side]} · 패 ${s.hand[side].length} · 묘지 ${s.grave[side].length} · 제외 ${s.banished[side].length}`,
+        'left',
+      );
+      if (names[side]) {
+        const p = L.piles[`deck-${side}`]!;
+        fx.fillStyle = 'rgba(140,160,190,0.85)';
+        fx.textAlign = side === 0 ? 'right' : 'left';
+        fx.fillText(names[side], side === 0 ? p.x + p.w : p.x, side === 0 ? p.y + L.cardH + 14 : p.y - 14);
       }
     }
-  }
 
-  // 중앙 상태
-  const phase = PHASE_NAMES[state.phase] ?? String(state.phase);
-  fx.font = '600 13px ui-monospace, Consolas, monospace';
-  fx.fillStyle = 'rgba(111,211,195,0.95)';
-  fx.fillText(`TURN ${state.turn} · ${phase}`, w / 2, h / 2 - 8);
-  if (state.chain.length) {
-    fx.font = '11px ui-monospace, Consolas, monospace';
-    fx.fillStyle = 'rgba(255,255,255,0.7)';
-    fx.fillText(state.chain.map((c) => c.code).join(' > '), w / 2, h / 2 + 12);
-  }
-  if (state.winner !== null) {
-    fx.font = '600 15px system-ui, sans-serif';
-    fx.fillStyle = 'rgba(255,220,140,0.95)';
-    fx.fillText(`WIN · P${state.winner + 1}`, w / 2, h / 2 + 38);
+    // 카드 코드 / SET / 펜듈럼 표시
+    fx.font = '9px ui-monospace, Consolas, monospace';
+    fx.textAlign = 'center';
+    for (let side = 0; side <= 1; side++) {
+      for (let i = 0; i < 7; i++) {
+        const code = s.mzone[side][i];
+        if (code === null) continue;
+        const r = L.zones[`m${side}-${i}`];
+        if (!r) continue;
+        fx.fillStyle = i >= 5 ? 'rgba(190,170,255,0.95)' : 'rgba(210,230,255,0.95)';
+        fx.fillText(String(code).slice(-6), r.x + r.w / 2, r.y + r.h / 2);
+      }
+      for (let i = 0; i < 6; i++) {
+        const code = s.szone[side][i];
+        if (code === null) continue;
+        const r = L.zones[`s${side}-${i}`];
+        if (!r) continue;
+        fx.fillStyle = i === 5 ? 'rgba(150,230,190,0.9)' : 'rgba(150,180,220,0.85)';
+        fx.fillText(i === 5 ? 'FIELD' : 'SET', r.x + r.w / 2, r.y + r.h / 2);
+      }
+    }
+
+    // 더미 위 장수
+    fx.font = '600 11px ui-monospace, Consolas, monospace';
+    const pile = (side: number, key: string, text: string, color: string) => {
+      const r = L.piles[`${key}-${side}`];
+      if (!r) return;
+      fx.fillStyle = 'rgba(0,0,0,0.45)';
+      fx.fillRect(r.x + 2, r.y + r.h - 15, r.w - 4, 13);
+      fx.fillStyle = color;
+      fx.fillText(text, r.x + r.w / 2, r.y + r.h - 8);
+    };
+    for (let side = 0; side <= 1; side++) {
+      pile(side, 'deck', String(s.deck[side]), 'rgba(200,225,255,0.95)');
+      pile(side, 'extra', String(s.extra[side]), 'rgba(190,190,255,0.9)');
+      pile(side, 'gy', String(s.grave[side].length), 'rgba(255,200,200,0.85)');
+      pile(side, 'ban', String(s.banished[side].length), 'rgba(230,200,255,0.85)');
+    }
+
+    // 중앙 상태
+    fx.font = '600 13px ui-monospace, Consolas, monospace';
+    fx.fillStyle = 'rgba(111,211,195,0.95)';
+    fx.textAlign = 'center';
+    fx.fillText(`TURN ${s.turn} · ${PHASE_NAMES[s.phase] ?? s.phase}`, w / 2, h / 2 - 6);
+    if (s.chain.length) {
+      fx.font = '11px ui-monospace, Consolas, monospace';
+      fx.fillStyle = 'rgba(255,255,255,0.72)';
+      fx.fillText(s.chain.map((c) => c.code).join(' > '), w / 2, h / 2 + 12);
+    }
+    if (s.winner !== null) {
+      fx.font = '600 15px system-ui, sans-serif';
+      fx.fillStyle = 'rgba(255,220,140,0.95)';
+      fx.fillText(`WIN · P${s.winner + 1}`, w / 2, h / 2 + 34);
+    }
   }
   fx.restore();
 }
 
-/* ---------- UI ---------- */
 function setName(id: string, v: string): void {
   $(id).textContent = v;
 }
@@ -233,9 +181,8 @@ async function load(files: FileList | null): Promise<void> {
   try {
     if (/\.json$/i.test(f.name)) {
       const j = JSON.parse(await f.text()) as ReplayJson;
-      const r = fromJson(j);
-      packets = r.packets;
-      nm = r.names;
+      packets = j.packets.map(([m, b]) => ({ message: m, data: b64ToU8(b) }));
+      nm = j.names;
     } else {
       const r = parseYrpx(new Uint8Array(await f.arrayBuffer()));
       packets = r.packets;
@@ -251,13 +198,11 @@ async function load(files: FileList | null): Promise<void> {
   core = new ReplayCore(packets);
   names = nm;
   fileName = f.name;
-  core.on('state', (s) => {
-    state = s;
+  core.on('state', (st) => {
+    state = st;
     draw();
     renderSummary();
   });
-  core.seek(0);
-  state = null;
   core.seek(0);
   setName('hint', `${packets.length.toLocaleString()}패킷 로드 · 재생/스텝 가능`);
 }
@@ -288,17 +233,14 @@ function boot(): void {
   setup();
   setName('hint', '리플레이(.json) 를 선택하세요');
 
-  // 탭 전환 (덱 편집기는 처음 열 때 로드)
   let deck: DeckEditor | null = null;
   document.querySelectorAll<HTMLButtonElement>('nav .tab').forEach((btn) => {
     btn.addEventListener('click', () => {
       const tab = btn.dataset.tab!;
       document.querySelectorAll('nav .tab').forEach((b) => b.classList.toggle('active', b === btn));
-      document.getElementById('tab-replay')!.classList.toggle('hidden', tab !== 'replay');
-      document.getElementById('tab-deck')!.classList.toggle('hidden', tab !== 'deck');
-      if (tab === 'deck' && !deck) {
-        deck = new DeckEditor(document.getElementById('deck-root')!);
-      }
+      $('tab-replay').classList.toggle('hidden', tab !== 'replay');
+      $('tab-deck').classList.toggle('hidden', tab !== 'deck');
+      if (tab === 'deck' && !deck) deck = new DeckEditor($('deck-root'));
     });
   });
 
@@ -313,10 +255,7 @@ function boot(): void {
     setName('speedv', String(speed));
   });
 
-  // PWA
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js').catch(() => {});
-  }
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
 
 boot();
