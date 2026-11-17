@@ -138,6 +138,16 @@
       .d-log div { padding: 2px 0; border-bottom: 1px solid rgba(242, 234, 214, 0.05); }
       .d-log div:last-child { border-bottom: 0; color: var(--fg); }
 
+      /* 세그먼트(체인 모드) */
+      .d-seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 9px; overflow: hidden; }
+      .d-seg button {
+        border: 0; border-radius: 0; min-height: 32px; padding: 4px 10px; font-size: 12.5px;
+        background: transparent; color: var(--fg2);
+      }
+      .d-seg button + button { border-left: 1px solid var(--line-strong); }
+      .d-seg button.on { background: rgba(232, 200, 122, 0.16); color: var(--gold); font-weight: 600; }
+      .d-seg button:hover { background: rgba(255, 255, 255, 0.05); }
+
       .sort-row { display: flex; align-items: center; gap: 8px; width: 100%; font-size: 12.5px; }
       .sort-row span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .sort-row button { min-height: 24px; padding: 0 8px; }

@@ -216,6 +216,19 @@ export class LocalCore implements ICore {
     }
   }
 
+  /** 항복 — ocgcore 에는 없으므로 합성 WIN 패킷으로 종료(리플레이에도 남는다) */
+  surrender(): void {
+    if (this.ended) return;
+    const data = Uint8Array.of(1, 0); // winner=상대(1)
+    this.packets.push({ message: 5, data });
+    applyPacket(this.state, { message: 5, data });
+    this.applied++;
+    this.pending = null;
+    this.ended = true;
+    this.emit('state', this.state);
+    this.emit('end', { winner: 1, reason: -1 });
+  }
+
   /** 기록된 패킷(리플레이 저장·재생용) */
   recorded(): Array<{ message: number; data: Uint8Array }> {
     return this.packets;

@@ -101,6 +101,9 @@ export class DuelScreen {
   private sortOrder: number[] = [];
   private layout: ReturnType<typeof layoutField> | null = null;
   private highlight: string[] = [];
+  /** 체인 모드 — on: 항상 묻기 / off: 자동 패스 / pause: 이번 턴만 자동 패스 */
+  private chainMode: 'on' | 'off' | 'pause' = 'on';
+  private pauseTurn = -1;
   private auto = false;
   private started = false;
   private busy = false;
@@ -119,6 +122,12 @@ export class DuelScreen {
             <label class="tag"><input id="d-auto" type="checkbox" /> 내 턴도 자동</label>
             <button id="d-stop">중지</button>
             <button id="d-save" disabled>리플레이 저장</button>
+            <button id="d-surrender" disabled>항복</button>
+            <span class="d-seg" id="d-chain">
+              <button data-chain="on" class="on">체인 ON</button>
+              <button data-chain="pause">일시 정지</button>
+              <button data-chain="off">OFF</button>
+            </span>
             <select id="d-mat" title="필드 매트">
               <option value="field3">매트 3</option>
               <option value="field">매트 1</option>
@@ -281,6 +290,22 @@ export class DuelScreen {
     });
     this.$('d-stop').addEventListener('click', () => this.stop());
     this.$('d-save').addEventListener('click', () => this.saveReplay());
+    this.$('d-surrender').addEventListener('click', () => {
+      if (!this.core) return;
+      this.core.surrender();
+      this.pushLog('항복 — 상대 승');
+      this.hint('항복했습니다');
+    });
+    this.root.querySelectorAll<HTMLButtonElement>('#d-chain button').forEach((b) => {
+      b.addEventListener('click', () => {
+        this.chainMode = (b.dataset.chain as 'on' | 'off' | 'pause') ?? 'on';
+        this.pauseTurn = this.chainMode === 'pause' ? (this.state?.turn ?? -1) : -1;
+        this.root.querySelectorAll('#d-chain button').forEach((x) => x.classList.toggle('on', x === b));
+        this.pushLog(`체인 모드: ${b.textContent}`);
+        // 이미 떠 있는 체인 프롬프트도 즉시 처리
+        if (this.prompt?.kind === 'chain' && this.chainMode !== 'on') this.maybeAutoPass();
+      });
+    });
     const mat = this.$<HTMLSelectElement>('d-mat');
     const saved = localStorage.getItem('edopro.mat') ?? 'field3';
     mat.value = saved;
@@ -362,6 +387,7 @@ export class DuelScreen {
     this.started = true;
     this.busy = false;
     (this.$('d-save') as HTMLButtonElement).disabled = false;
+    (this.$('d-surrender') as HTMLButtonElement).disabled = false;
     this.log = [];
     this.state = this.core.snapshot;
     this.setupCanvas();
@@ -400,6 +426,7 @@ export class DuelScreen {
     this.sel.clear();
     this.state = null;
     (this.$('d-save') as HTMLButtonElement).disabled = true;
+    (this.$('d-surrender') as HTMLButtonElement).disabled = true;
     this.render();
     this.hint('중지됨');
   }
@@ -445,6 +472,12 @@ export class DuelScreen {
     this.pushLog(`${p.kind}${'player' in p ? ` (P${p.player + 1})` : ''}`);
     this.renderPrompt();
 
+    // 체인 모드: off / pause(이번 턴) 이면 내 체인 요청을 자동 패스
+    if (p.kind === 'chain' && p.player === 0 && !p.forced && this.shouldAutoPass()) {
+      window.setTimeout(() => this.respond(encodeIndex(-1)), 40);
+      return;
+    }
+
     // 상대(또는 자동 모드) → 즉시 응답
     const autoNow = p.player === 1 || this.auto;
     if (autoNow) {
@@ -454,6 +487,19 @@ export class DuelScreen {
         this.respond(autoChoice(p));
       }, p.player === 1 ? 180 : 60);
     }
+  }
+
+  private shouldAutoPass(): boolean {
+    if (this.chainMode === 'off') return true;
+    if (this.chainMode === 'pause') return this.state?.turn === this.pauseTurn;
+    return false;
+  }
+
+  /** 모드 변경 직후, 이미 떠 있는 체인 프롬프트를 처리 */
+  private maybeAutoPass(): void {
+    const p = this.prompt;
+    if (!p || p.kind !== 'chain' || p.player !== 0 || p.forced) return;
+    if (this.shouldAutoPass()) this.respond(encodeIndex(-1));
   }
 
   private respond(bytes: Uint8Array): void {
