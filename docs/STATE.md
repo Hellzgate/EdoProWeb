@@ -1,6 +1,6 @@
 # EDOPro Web — 현재 상태 / 다음 작업 (인수인계)
 
-> 새 세션은 **이 파일만 읽고** 이어서 시작한다. (2026-11-17 기준 · 배포 `edopro-client:0.7.5`)
+> 새 세션은 **이 파일만 읽고** 이어서 시작한다. (2026-11-17 기준 · 배포 `edopro-client:0.7.8`)
 > 최신 커밋: `2bda383`(LocalCore) 이후 → 이번 작업분 커밋 예정.
 
 ## 1. 한 줄 상태
@@ -71,16 +71,22 @@ cd client
 npm run typecheck && npm test && npm run build     # 3/3 통과 기준
 node public/wasm/wasm-abi.mjs                      # C 심 8개 export
 node tools/duel-full.mjs 3000                      # 실제 카드·스크립트 → WIN (RETRY 0)
+node tools/duel-record-test.mjs                    # 로컬 듀얼 기록 → ReplayCore 재생 왕복 일치
 python tools/gen-script-index.mjs                  # script/index.json
 python tools/patch-cards-meta.py                   # setcodes 등 주입
 ```
 `duel-full.mjs` 실측: `WIN P1 · reason 1(LP 0) · 434스텝 · RETRY 0 · 카드 22,654 · 스크립트 4,973`
+`duel-record-test.mjs` 실측: `기록 1,055패킷 → 라이브/재생 상태 완전 일치 (lp·deck·mzone·grave·winner)`
+
+### 리플레이 저장
+로컬 듀얼 툴바 **[리플레이 저장]** → `local-<시각>.json` 다운로드 → **리플레이 탭에서 그대로 열린다**.
+(합성 `MSG_START` 패킷을 기록에 포함시켜 덱 장수/LP 가 라이브와 동일하게 재생된다)
 
 ## 7. 배포
 
 | 항목 | 값 |
 |---|---|
-| 이미지 | `edopro-client:0.7.5` (0.6.0 → 0.7.5) |
+| 이미지 | `edopro-client:0.7.8` (0.6.0 → 0.7.8) |
 | 컨테이너 | `edopro-client` · `--restart unless-stopped` · **:7560** |
 | 데이터 | 볼륨 `/home/hellzsub/edopro-data` → `/data` (**root 소유** → 갱신은 docker 임시 컨테이너로) |
 | 데이터 갱신(로컬→서버) | `docker run --rm -v /home/hellzsub/edopro-data:/data -v ~/up.json:/src/x:ro alpine cp …` |
@@ -114,10 +120,11 @@ python tools/patch-cards-meta.py                   # setcodes 등 주입
 client/wasm/webapi.cpp        ocgcore C 심 (create/start/process/get_message/response/new_card/load_script)
 client/tools/build-core.sh    WASM 빌드(17 core + 26 lua, em++ -fexceptions)
 client/public/wasm/           ocgcore.js/.wasm(1.7MB) · wasm-abi.mjs · wasm-smoke.mjs
-client/src/core/              ICore · ReplayCore · LocalCore · ocgcore
+client/src/core/              ICore · ReplayCore · LocalCore(패킷 기록 포함) · ocgcore
 client/src/duel/prompts.ts    선택 메시지 ↔ 응답 + autoChoice
-client/src/ui/                DuelScreen · DeckEditor · DataPanel
+client/src/ui/                DuelScreen(보드·프롬프트·리플레이 저장) · DeckEditor · DataPanel
 client/src/engine/            state.ts(결정적 상태기계) · msg.ts(95종) · yrpx.ts
-client/tools/                 sync-data.py · refresh.sh · cards.py · patch-cards-meta.py · gen-script-index.mjs · duel-full.mjs
+client/tools/                 sync-data.py · refresh.sh · cards.py · patch-cards-meta.py ·
+                              gen-script-index.mjs · duel-full.mjs · duel-record-test.mjs
 docs/                         DESIGN-V2 · GAP-ANALYSIS · DATA-REPOS · YGO-FIELD-LAYOUT · STATE
 ```

@@ -75,6 +75,8 @@ export class LocalCore implements ICore {
   /** 진단: 마지막 배치의 메시지 타입/상태 */
   lastBatch: number[] = [];
   lastStatus = -1;
+  /** 기록된 패킷(리플레이 저장용) */
+  private packets: Array<{ message: number; data: Uint8Array }> = [];
   /** 시스템 스크립트 로드 결과(진단용) */
   readonly scriptReport = { loaded: 0, missing: [] as string[] };
 
@@ -93,9 +95,20 @@ export class LocalCore implements ICore {
       moduleUrl: opts.moduleUrl,
     });
     const core = new LocalCore(duel);
-    // ocgcore 는 MSG_START(덱 장수)를 보내지 않는다(호스트가 알려주는 값) → 직접 채운다
-    core.state.deck = [opts.decks[0].main.length, opts.decks[1].main.length];
-    core.state.extra = [(opts.decks[0].extra ?? []).length, (opts.decks[1].extra ?? []).length];
+    // ocgcore 는 MSG_START(덱 장수/LP)를 보내지 않는다(호스트 값) → **합성 START 패킷**을 기록/상태에 넣는다.
+    //   재생(ReplayCore)과 라이브가 같은 숫자를 갖게 하려면 반드시 패킷으로 남겨야 한다.
+    const start = new Uint8Array(17);
+    const sdv = new DataView(start.buffer);
+    start[0] = 0; // 선공
+    const lp = opts.lp ?? 8000;
+    sdv.setUint32(1, lp, true);
+    sdv.setUint32(5, lp, true);
+    sdv.setUint16(9, opts.decks[0].main.length, true);
+    sdv.setUint16(11, (opts.decks[0].extra ?? []).length, true);
+    sdv.setUint16(13, opts.decks[1].main.length, true);
+    sdv.setUint16(15, (opts.decks[1].extra ?? []).length, true);
+    core.packets.push({ message: 4, data: start });
+    applyPacket(core.state, { message: 4, data: start });
 
     for (const name of SYSTEM_SCRIPTS) {
       if (duel.preloadScript(name)) core.scriptReport.loaded++;
@@ -166,6 +179,7 @@ export class LocalCore implements ICore {
       this.lastStatus = status;
       this.lastBatch = packets.map((p) => p.type);
       for (const p of packets) {
+        this.packets.push({ message: p.type, data: p.data });
         applyPacket(this.state, { message: p.type, data: p.data });
         this.applied++;
         if (p.type === 1) this.retries++;
@@ -200,6 +214,11 @@ export class LocalCore implements ICore {
       }
       // CONTINUE: 계속
     }
+  }
+
+  /** 기록된 패킷(리플레이 저장·재생용) */
+  recorded(): Array<{ message: number; data: Uint8Array }> {
+    return this.packets;
   }
 
   /** 라이브 듀얼은 되감기 없음 — 인터페이스만 만족 */

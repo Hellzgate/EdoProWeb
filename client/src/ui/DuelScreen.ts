@@ -76,6 +76,7 @@ export class DuelScreen {
             <input id="d-ydk" type="file" accept=".ydk" />
             <label class="tag"><input id="d-auto" type="checkbox" /> 내 턴도 자동</label>
             <button id="d-stop">중지</button>
+            <button id="d-save" disabled>리플레이 저장</button>
             <span class="tag" id="d-hint">카드 DB·스크립트 준비 중…</span>
           </div>
           <div id="d-stage">
@@ -90,6 +91,8 @@ export class DuelScreen {
         </aside>
       </div>`;
     this.bind();
+    this.setupCanvas();
+    requestAnimationFrame(() => this.resize());
   }
 
   private $<T extends HTMLElement = HTMLElement>(id: string): T {
@@ -107,6 +110,7 @@ export class DuelScreen {
       }
     });
     this.$('d-stop').addEventListener('click', () => this.stop());
+    this.$('d-save').addEventListener('click', () => this.saveReplay());
     this.$<HTMLInputElement>('d-ydk').addEventListener('change', async (e) => {
       const f = (e.target as HTMLInputElement).files?.[0];
       if (!f) return;
@@ -178,6 +182,7 @@ export class DuelScreen {
 
     this.started = true;
     this.busy = false;
+    (this.$('d-save') as HTMLButtonElement).disabled = false;
     this.log = [];
     this.state = this.core.snapshot;
     this.setupCanvas();
@@ -215,8 +220,39 @@ export class DuelScreen {
     this.prompt = null;
     this.sel.clear();
     this.state = null;
+    (this.$('d-save') as HTMLButtonElement).disabled = true;
     this.render();
     this.hint('중지됨');
+  }
+
+  /** 현재까지의 패킷을 리플레이 뷰어 형식(.json)으로 저장 */
+  private saveReplay(): void {
+    if (!this.core) return;
+    const packets = this.core.recorded();
+    if (!packets.length) {
+      this.pushLog('저장할 패킷이 없습니다');
+      return;
+    }
+    const b64 = (u8: Uint8Array): string => {
+      let s = '';
+      for (let i = 0; i < u8.length; i += 4096) {
+        s += String.fromCharCode(...u8.subarray(i, i + 4096));
+      }
+      return btoa(s);
+    };
+    const name = `local-${new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19)}.json`;
+    const json = {
+      file: name,
+      names: ['나', '상대'],
+      turns: this.state?.turn ?? 0,
+      packets: packets.map((p) => [p.message, b64(p.data)]),
+    };
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(json)], { type: 'application/json' }));
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    this.pushLog(`리플레이 저장: ${name} (${packets.length}패킷)`);
   }
 
   /* ---------------- 입력 ---------------- */
@@ -477,8 +513,14 @@ export class DuelScreen {
   }
 
   private setupCanvas(): void {
+    if (this.gl) return;
     this.gl = new BoardRenderer(this.root.querySelector('#d-gl') as HTMLCanvasElement);
     this.fx = (this.root.querySelector('#d-fx') as HTMLCanvasElement).getContext('2d')!;
+  }
+
+  /** 탭이 보일 때 호출 — 캔버스 크기를 다시 잡는다 */
+  show(): void {
+    this.resize();
   }
 
   private resize(): void {

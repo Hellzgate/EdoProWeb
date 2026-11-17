@@ -249,6 +249,7 @@ function boot(): void {
       if (tab === 'deck' && !deck) deck = new DeckEditor($('deck-root'));
       if (tab === 'data' && !data) data = new DataPanel($('data-root'));
       if (tab === 'duel' && !duel) duel = new DuelScreen($('duel-root'));
+      if (tab === 'duel') duel?.show();
     });
   });
 
