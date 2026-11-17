@@ -322,6 +322,13 @@ export class DuelScreen {
       void this.start(parseYdk(txt));
     });
     window.addEventListener('resize', () => this.resize());
+    window.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape' || !this.prompt) return;
+      const p = this.prompt;
+      if (p.kind === 'chain' && !p.forced) this.respond(encodeIndex(-1));
+      else if ((p.kind === 'card' || p.kind === 'tribute') && p.cancelable && p.min === 0) this.respond(encodeCards([], true));
+      else if (p.kind === 'unselect' && (p.finishable || p.cancelable)) this.respond(encodeUnselect(-1, 0));
+    });
   }
 
   /* ---------------- 준비 ---------------- */
