@@ -59,6 +59,7 @@ docker run -d --name edopro-web --restart unless-stopped \
 | [docs/PATCHES.md](docs/PATCHES.md) | 원본 소스에 가한 **모든 변경** 목록과 이유 |
 | [docs/API.md](docs/API.md) | 서버 HTTP/WS API |
 | [docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md) | 남은 문제·다음 단계 |
+| [docs/GAP-ANALYSIS.md](docs/GAP-ANALYSIS.md) | **원본 대비 격차 전수 조사 + 방안**(2026-11-17, P0=퍼즐/패 테스트) |
 | [docs/MOBILE-WEB.md](docs/MOBILE-WEB.md) | **모바일 브라우저 상태·진단 방법**(`/api/jlog`, Range, 로딩 오버레이) |
 | [LICENSE-NOTICE.md](LICENSE-NOTICE.md) | AGPL 등 라이선스 고지 |
 
