@@ -24,7 +24,7 @@ done
 echo "obj: core=$(ls "$OBJ"/core/*.o | wc -l) lua=$(ls "$OBJ"/lua/*.o | wc -l)"
 
 CORE_EXPORTS=$(python3 "$HOME/gen-exports.py" "$E/ocgapi.h" 2>"$OUT/exports.log")
-WEB_EXPORTS='"_malloc","_free","_web_create_duel","_web_last_create_status","_web_start_duel","_web_process","_web_get_message","_web_msg_length","_web_set_response_int","_web_set_response_buf","_web_destroy_duel","_web_new_card","_web_load_script","_web_get_version"'
+WEB_EXPORTS='"_malloc","_free","_web_create_duel","_web_last_create_status","_web_start_duel","_web_process","_web_get_message","_web_msg_length","_web_set_response_int","_web_set_response_buf","_web_destroy_duel","_web_new_card","_web_load_script","_web_query_card","_web_get_version"'
 echo "exports(core): $(tail -2 "$OUT/exports.log" | head -1)"
 
 em++ "$OBJ"/core/*.o "$OBJ"/lua/*.o -o "$OUT/ocgcore.js" \

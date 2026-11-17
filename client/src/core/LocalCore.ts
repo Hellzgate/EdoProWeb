@@ -191,7 +191,10 @@ export class LocalCore implements ICore {
           return;
         }
       }
-      if (packets.length) this.emit('state', this.state);
+      if (packets.length) {
+        this.refreshStats();
+        this.emit('state', this.state);
+      }
 
       if (status === OCG_STATUS.END) {
         if (!this.ended) {
@@ -227,6 +230,30 @@ export class LocalCore implements ICore {
     this.ended = true;
     this.emit('state', this.state);
     this.emit('end', { winner: 1, reason: -1 });
+  }
+
+  /** 필드 카드 현재 값(공수/엑시즈 소재/카운터) — 렌더러가 읽는다 */
+  readonly stats = new Map<string, { atk: number; def: number; overlays: number; counters: number }>();
+
+  private refreshStats(): void {
+    for (let side = 0; side <= 1; side++) {
+      for (let i = 0; i < 7; i++) {
+        if (this.state.mzone[side][i] === null) {
+          this.stats.delete(`m${side}-${i}`);
+          continue;
+        }
+        const q = this.duel.queryCard(side, 0x04, i);
+        if (q) this.stats.set(`m${side}-${i}`, q);
+      }
+      for (let i = 0; i < 6; i++) {
+        if (this.state.szone[side][i] === null) {
+          this.stats.delete(`s${side}-${i}`);
+          continue;
+        }
+        const q = this.duel.queryCard(side, 0x08, i);
+        if (q) this.stats.set(`s${side}-${i}`, q);
+      }
+    }
   }
 
   /** 기록된 패킷(리플레이 저장·재생용) */

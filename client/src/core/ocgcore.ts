@@ -65,6 +65,7 @@ interface Module {
     con: number, loc: number, seq: number, pos: number,
   ): void;
   _web_load_script(d: number, buf: number, len: number, name: number): number;
+  _web_query_card(d: number, ctrl: number, loc: number, seq: number, out: number): number;
   _web_get_version(major: number, minor: number): void;
   addFunction(fn: (...args: number[]) => number | void, sig: string): number;
   removeFunction(idx: number): void;
@@ -229,6 +230,29 @@ export class OcgDuel {
 
   respondInt(value: number): void {
     this.M._web_set_response_int(this.duel, value | 0);
+  }
+
+  /** 필드 카드 조회 — 현재 공수/엑시즈 소재/카운터 (공개 정보만) */
+  queryCard(
+    ctrl: number,
+    loc: number,
+    seq: number,
+  ): { atk: number; def: number; overlays: number; counters: number } | null {
+    if (this.destroyed || !this.duel) return null;
+    const M = this.M;
+    const out = M._malloc(16);
+    try {
+      const rc = M._web_query_card(this.duel, ctrl, loc, seq, out);
+      if (rc !== 0) return null;
+      return {
+        atk: M.HEAP32[out >> 2] | 0,
+        def: M.HEAP32[(out + 4) >> 2] | 0,
+        overlays: M.HEAPU32[(out + 8) >> 2]!,
+        counters: M.HEAPU32[(out + 12) >> 2]!,
+      };
+    } finally {
+      M._free(out);
+    }
   }
 
   destroy(): void {

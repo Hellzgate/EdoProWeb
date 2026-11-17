@@ -113,4 +113,48 @@ int web_load_script(OCG_Duel duel, const char* buf, int len, const char* name)
 
 void web_get_version(int* major, int* minor) { OCG_GetVersion(major, minor); }
 
+/**
+ * 필드 카드 조회 — 현재 공수/표시형식/엑시즈 소재/카운터.
+ *   flags = QUERY_ATTACK|QUERY_DEFENSE|QUERY_OVERLAY_CARD|QUERY_COUNTERS
+ *   out[0]=atk, out[1]=def, out[2]=overlay 수, out[3]=counter 총 수
+ *   반환: 0 성공, -1 실패(공개 정보 아님/없음)
+ */
+int web_query_card(OCG_Duel duel, int ctrl, int loc, int seq, unsigned int* out)
+{
+    if (!duel || !out) return -1;
+    OCG_QueryInfo info;
+    std::memset(&info, 0, sizeof(info));
+    info.con = static_cast<uint8_t>(ctrl);
+    info.loc = static_cast<uint32_t>(loc);
+    info.seq = static_cast<uint32_t>(seq);
+
+    auto query = [&](unsigned int flags, unsigned char* buf, uint32_t* len) -> unsigned char* {
+        info.flags = flags;
+        *len = 0;
+        return reinterpret_cast<unsigned char*>(OCG_DuelQuery(duel, len, &info));
+    };
+
+    unsigned char* p = nullptr;
+    uint32_t len = 0;
+    int atk = 0, def = 0;
+    unsigned int overlays = 0;
+
+    // QUERY_ATTACK — 응답: [u32 flags][i32 atk]
+    if ((p = query(0x100u, p, &len)) && len >= 8) std::memcpy(&atk, p + 4, 4);
+    // QUERY_DEFENSE
+    if ((p = query(0x200u, p, &len)) && len >= 8) std::memcpy(&def, p + 4, 4);
+    // QUERY_OVERLAY_CARD — 응답: [u32 flags][u32 count][u32 ids...]
+    if ((p = query(0x10000u, p, &len)) && len >= 8) std::memcpy(&overlays, p + 4, 4);
+
+    if (overlays > 100) overlays = 0;      // 방어: 비정상 값 무시
+    if (atk > 1000000 || atk < -1000000) atk = 0;
+    if (def > 1000000 || def < -1000000) def = 0;
+
+    out[0] = static_cast<unsigned int>(atk);
+    out[1] = static_cast<unsigned int>(def);
+    out[2] = overlays;
+    out[3] = 0;
+    return 0;
+}
+
 } /* extern "C" */

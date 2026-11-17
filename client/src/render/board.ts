@@ -22,6 +22,8 @@ export interface BoardLabels {
   names?: string[];
   /** 강조할 존 키(`m0-1`, `s1-0` …) — 선택 대상 */
   highlight?: string[];
+  /** 존별 현재 값(공수/엑시즈 소재) — 엔진 조회 결과 */
+  stats?: Map<string, { atk: number; def: number; overlays: number; counters: number }>;
 }
 
 export function drawBoard(
@@ -150,6 +152,46 @@ export function drawBoard(
       ctx.fillStyle = '#1a1408';
       ctx.font = `700 ${Math.max(8, Math.round(bw * 0.6))}px ui-monospace, Consolas, monospace`;
       ctx.fillText(String(scale), r.x + r.w / 2, r.y - bw * 0.5);
+    }
+  }
+
+  /* 3.7) 현재 공수 / 엑시즈 소재 (엔진 조회값) */
+  for (const key of labels.stats?.keys() ?? []) {
+    const st = labels.stats!.get(key)!;
+    const r = layout.zones[key];
+    if (!r) continue;
+    const code = key[0] === 'm'
+      ? s.mzone[Number(key[1])]?.[Number(key.split('-')[1])]
+      : s.szone[Number(key[1])]?.[Number(key.split('-')[1])];
+    const base = code === null || code === undefined ? undefined : cardById(code);
+    const isMonster = key[0] === 'm';
+    // ⚠ 이 ocgcore 빌드에서 OCG_DuelQuery 가 0 을 돌려주는 경우가 있어(원인 조사 필요)
+    //    atk/def 가 모두 0 이면 표시하지 않는다(잘못된 값 노출 방지)
+    if (st.atk === 0 && st.def === 0) continue;
+    if (isMonster && base && (st.atk !== base.atk || st.def !== base.def)) {
+      const txt = `${st.atk}/${st.def}`;
+      const fs = Math.max(8, Math.round(r.w * 0.16));
+      ctx.font = `700 ${fs}px ui-monospace, Consolas, monospace`;
+      const tw = ctx.measureText(txt).width;
+      roundRect(ctx, { x: r.x + r.w / 2 - tw / 2 - 3, y: r.y + r.h - fs * 1.6, w: tw + 6, h: fs * 1.5 }, 3);
+      ctx.fillStyle = st.atk > base.atk ? 'rgba(120,214,150,0.95)' : st.atk < base.atk ? 'rgba(230,140,150,0.95)' : 'rgba(20,24,28,0.9)';
+      ctx.fill();
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#0d1114';
+      ctx.fillText(txt, r.x + r.w / 2, r.y + r.h - fs * 0.85);
+    }
+    if (st.overlays > 0) {
+      const bw = Math.max(14, r.w * 0.28);
+      roundRect(ctx, { x: r.x + r.w - bw - 1, y: r.y + r.h - bw - 1, w: bw, h: bw }, 3);
+      ctx.fillStyle = 'rgba(30,26,60,0.92)';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(232,200,122,0.6)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.textAlign = 'center';
+      ctx.fillStyle = 'rgba(232,200,122,0.95)';
+      ctx.font = `700 ${Math.max(8, Math.round(bw * 0.66))}px ui-monospace, Consolas, monospace`;
+      ctx.fillText(`${st.overlays}`, r.x + r.w - bw / 2 - 1, r.y + r.h - bw / 2 - 1);
     }
   }
 

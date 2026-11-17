@@ -788,7 +788,7 @@ export class DuelScreen {
     const fx = this.fx;
     fx.save();
     fx.scale(dpr, dpr);
-    drawBoard(fx, w, h, layout, this.state, { names: ['나', '상대'], highlight: this.highlight });
+    drawBoard(fx, w, h, layout, this.state, { names: ['나', '상대'], highlight: this.highlight, stats: this.core?.stats });
     fx.restore();
 
     this.renderStatus();
